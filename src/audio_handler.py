@@ -15,7 +15,7 @@ class AudioDataset(Dataset):
                     continue
                 waveform, sr = torchaudio.load(os.path.join(self.audio_path, dir1, dir2))
                 waveform, sr = self.audio_preprocess(waveform, sr, self.target_sr)
-                self.data.append(waveform)
+                self.data.append(waveform.squeeze(0))
 
     def audio_preprocess(self, waveform, sr, target_sr):
         # resample
@@ -36,3 +36,9 @@ class AudioDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx]
+
+
+def collate_padding(batch):
+    batch = rnn_utils.pad_sequence(batch, batch_first=True, padding_value=0)
+    batch = batch.unsqueeze(1)
+    return batch

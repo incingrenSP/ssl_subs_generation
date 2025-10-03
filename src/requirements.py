@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
+import torch.nn.utils.rnn as rnn_utils
 
 import torchaudio
 import torchaudio.transforms as T
