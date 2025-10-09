@@ -1,41 +1,44 @@
 from src.requirements import *
         
 class AudioDataset(Dataset):
-    def __init__(self, audio_path, device='cpu', target_sr=16000):
+    def __init__(self, audio_path, target_sr=16000, transform=None):
         self.audio_path = audio_path
-        self.device = device
         self.target_sr = target_sr
-        self.data = []
-        self.load_data()
-        
-    def load_data(self):
-        for dir1 in os.listdir(self.audio_path):
-            for dir2 in tqdm(os.listdir(os.path.join(self.audio_path, dir1))):
-                if os.path.splitext(dir2)[1] == '.tsv':
-                    continue
-                waveform, sr = torchaudio.load(os.path.join(self.audio_path, dir1, dir2))
-                waveform, sr = self.audio_preprocess(waveform, sr, self.target_sr)
-                self.data.append(waveform.squeeze(0))
+        self.transform = transform
+        self.file_list = []
+        self._gather_files()
 
-    def audio_preprocess(self, waveform, sr, target_sr):
-        # resample
-        resampler = T.Resample(orig_freq=sr, new_freq=target_sr)
-        waveform = resampler(waveform)
-    
-        # stereo -> mono
-        waveform_mono = torch.mean(waveform, dim=0, keepdim=True)
-        waveform = waveform_mono
-    
-        # normalize
-        waveform = waveform / waveform.abs().max()
-    
-        return waveform, target_sr
+    def _gather_files(self):
+        for dir1 in os.listdir(self.audio_path):
+            if dir1.endswith('.tsv'):
+                continue
+            subdir = os.path.join(self.audio_path, dir1)
+            for dir2 in tqdm(os.listdir(subdir)):
+                if dir2.endswith('.tsv'):
+                    continue
+                path = os.path.join(subdir, dir2)
+                self.file_list.append(path)
 
     def __len__(self):
-        return len(self.data)
+        return len(self.file_list)
 
     def __getitem__(self, idx):
-        return self.data[idx]
+        path = self.file_list[idx]
+        waveform, sr = torchaudio.load(path)
+
+        if sr != self.target_sr:
+            resampler = T.Resampler(orig_freq=sr, new_freq=self.target_sr)
+            waveform = resampler(waveform)
+
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+
+        waveform = waveform / (waveform.abs().max() + 1e-8)
+
+        if self.transform:
+            waveform = self.transform(waveform)
+
+        return waveform.squeeze(0)
 
 
 def collate_padding(batch):
