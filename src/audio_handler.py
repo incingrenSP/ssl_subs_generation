@@ -24,14 +24,15 @@ class AudioDataset(Dataset):
 
     def __getitem__(self, idx):
         path = self.file_list[idx]
-        waveform, sr = torchaudio.load(path)
+        waveform, sr = sf.read(path, always_2d=True)
+        waveform = torch.Tensor(waveform.T)
 
         if sr != self.target_sr:
             resampler = T.Resampler(orig_freq=sr, new_freq=self.target_sr)
             waveform = resampler(waveform)
 
         if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
+            waveform = torch.mean(waveform, dim=0, keepdim=True)
 
         waveform = waveform / (waveform.abs().max() + 1e-8)
 
@@ -39,7 +40,6 @@ class AudioDataset(Dataset):
             waveform = self.transform(waveform)
 
         return waveform.squeeze(0)
-
 
 def collate_padding(batch):
     batch = rnn_utils.pad_sequence(batch, batch_first=True, padding_value=0)
