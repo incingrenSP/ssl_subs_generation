@@ -27,14 +27,14 @@ class AudioDataset(Dataset):
         waveform, sr = sf.read(path, always_2d=True)
         waveform = torch.Tensor(waveform.T)
 
-        if sr != self.target_sr:
-            resampler = T.Resampler(orig_freq=sr, new_freq=self.target_sr)
-            waveform = resampler(waveform)
+        # if sr != self.target_sr:
+        #     resampler = T.Resampler(orig_freq=sr, new_freq=self.target_sr)
+        #     waveform = resampler(waveform)
 
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
-        waveform = waveform / (waveform.abs().max() + 1e-8)
+        waveform = waveform / torch.max(torch.abs(waveform))
 
         if self.transform:
             waveform = self.transform(waveform)
