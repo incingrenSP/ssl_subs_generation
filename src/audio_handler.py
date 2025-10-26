@@ -1,47 +1,98 @@
 from src.requirements import *
         
 class AudioDataset(Dataset):
-    def __init__(self, audio_path, target_sr=16000, transform=None):
-        self.audio_path = audio_path
-        self.target_sr = target_sr
-        self.transform = transform
-        self.file_list = []
-        self._gather_files()
-
-    def _gather_files(self):
-        for dir1 in os.listdir(self.audio_path):
-            if dir1.endswith('.tsv'):
-                continue
-            subdir = os.path.join(self.audio_path, dir1)
-            for dir2 in tqdm(os.listdir(subdir)):
-                if dir2.endswith('.tsv'):
-                    continue
-                path = os.path.join(subdir, dir2)
-                self.file_list.append(path)
+    def __init__(self, metadata_path):
+        super().__init__()
+        self.df = pd.read_csv(metadata_path, sep="\t")
 
     def __len__(self):
-        return len(self.file_list)
+        return len(self.df)
 
     def __getitem__(self, idx):
-        path = self.file_list[idx]
+        path = self.df.iloc[idx]['path']
         waveform, sr = sf.read(path, always_2d=True)
-        waveform = torch.Tensor(waveform.T)
-
-        # if sr != self.target_sr:
-        #     resampler = T.Resampler(orig_freq=sr, new_freq=self.target_sr)
-        #     waveform = resampler(waveform)
+        waveform = torch.tensor(waveform.T, dtype=torch.float32)
 
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
         waveform = waveform / torch.max(torch.abs(waveform))
 
-        if self.transform:
-            waveform = self.transform(waveform)
-
         return waveform.squeeze(0)
+
+class ASRDataset(Dataset):
+    def __init__(self, metadata_path, tokenizer):
+        super().__init__()
+        self.df = pd.read_csv(metadata_path, sep="\t")
+        self.tokenizer = tokenizer
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        waveform, sr = sf.read(row['path'], always_2d=True)
+            
+        waveform = torch.tensor(waveform.T, dtype=torch.float32)
+
+        if waveform.shape[0] > 1:
+            waveform = torch.mean(waveform, dim=0, keepdim=True)
+
+        waveform = waveform / torch.max(torch.abs(waveform))
+            
+        target = self.tokenizer.encode(row['transcript'])
+        
+        return waveform.squeeze(0), torch.tensor(target, dtype=torch.long)
+
+class Tokenizer:
+    def __init__(self, corpus_path, add_blank=True):        
+        with open(corpus_path, 'r', encoding='utf-8') as f:
+            lines = [unicodedata.normalize('NFC', l.strip()) for l in f]
+
+        tokens = []
+        for line in lines:
+            tokens.extend(self.tokenize(line))
+
+        counter = Counter(tokens)
+        self.vocab = sorted(counter.keys())
+
+        if add_blank:
+            self.vocab = ['<blank>'] + self.vocab
+
+        self.token_to_id = {t: i for i, t in enumerate(self.vocab)}
+        self.id_to_token = {i: t for t, i in self.token_to_id.items()}
+
+    def tokenize(self, text):
+        text = unicodedata.normalize('NFC', text)
+        return regex.findall(r'\X', text)
+
+    def encode(self, text):
+        tokens = self.tokenize(text)
+        return [self.token_to_id[t] for t in tokens if t in self.token_to_id]
+
+    def decode(self, ids):
+        return ''.join([self.id_to_token[i] for i in ids if i in self.id_to_token])
 
 def collate_padding(batch):
     batch = rnn_utils.pad_sequence(batch, batch_first=True, padding_value=0)
     batch = batch.unsqueeze(1)
     return batch
+
+def collate_padding_asr(batch):
+    waveforms, targets = zip(*batch)
+    waveforms = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0)
+    targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=0)
+    
+    waveforms = waveforms.unsqueeze(1)
+    
+    input_len = torch.tensor([wave.shape[-1] for wave in waveforms], dtype=torch.long)
+    target_len = torch.tensor([len(target) for target in targets], dtype=torch.long)
+    
+    return waveforms, targets, input_len, target_len
+
+def load_text(text_path):
+    all_text = ""
+    for file in tqdm(glob.glob(text_path + "/**/*.txt", recursive=True)):
+        with open(file, "r", encoding="utf-8") as f:
+            all_text += f.read() + "\n"
+    return all_text

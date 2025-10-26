@@ -1,6 +1,7 @@
-/data/
-/_data/
+/data/audio/
+/data/text/
 /plots/
 /.ipynb_checkpoints/
 /src/__pycache__/
 /src/.ipynb_checkpoints/
+/.ipynb_checkpoints/
