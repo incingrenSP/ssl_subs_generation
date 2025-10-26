@@ -11,7 +11,6 @@ def compute_mask_indices(B, T, mask_prob, mask_length, device="cpu"):
             mask[b, s : s + mask_length] = True
     return mask
 
-# Feature Encoder
 class FeatureEncoder(nn.Module):
     def __init__(self, in_channels=1, hidden_dim=128):
         super().__init__()
@@ -25,7 +24,6 @@ class FeatureEncoder(nn.Module):
     def forward(self, x):
         return self.encoder(x)
 
-# Context Network (RNN)
 class AutoregressiveContext(nn.Module):
     def __init__(self, input_dim, hidden_dim):
         super().__init__()
@@ -36,7 +34,6 @@ class AutoregressiveContext(nn.Module):
         output, _ = self.gru(z)
         return output
 
-# Contrastive Head
 class ContrastivePredictor(nn.Module):
     def __init__(self, hidden_dim, proj_dim):
         super().__init__()
@@ -45,7 +42,6 @@ class ContrastivePredictor(nn.Module):
     def forward(self, x):
         return self.project(x)
 
-# Full Model
 class SSLAutoregressiveModel(nn.Module):
     def __init__(self, feat_dim=128, proj_dim=128):
         super().__init__()
