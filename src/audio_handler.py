@@ -80,15 +80,16 @@ def collate_padding(batch):
 
 def collate_padding_asr(batch):
     waveforms, targets = zip(*batch)
-    waveforms = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0)
-    targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=0)
     
+    waveforms = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0)    
     waveforms = waveforms.unsqueeze(1)
     
-    input_len = torch.tensor([wave.shape[-1] for wave in waveforms], dtype=torch.long)
-    target_len = torch.tensor([len(target) for target in targets], dtype=torch.long)
+    target_len = torch.tensor([target.size(0) for target in targets], dtype=torch.long)
+
+    # padding value -1 to not get nan cuz ctc is a bitch
+    targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=-1)
     
-    return waveforms, targets, input_len, target_len
+    return waveforms, targets, target_len
 
 def load_text(text_path):
     all_text = ""

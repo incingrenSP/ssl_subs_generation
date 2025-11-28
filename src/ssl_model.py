@@ -1,9 +1,7 @@
 from src.requirements import *
 
 def compute_mask_indices(B, T, mask_prob, mask_length, device="cpu"):
-
     mask = torch.zeros(B, T, dtype=torch.bool, device=device)
-
     num_masked_spans = int((T * mask_prob) / mask_length)
     for b in range(B):
         starts = torch.randint(0, T - mask_length, (num_masked_spans,))
@@ -15,10 +13,21 @@ class FeatureEncoder(nn.Module):
     def __init__(self, in_channels=1, hidden_dim=128):
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Conv1d(in_channels, hidden_dim, kernel_size=7, stride=5, padding=3),
-            nn.ReLU(),
-            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=5, stride=4, padding=2),
-            nn.ReLU()
+            nn.Conv1d(in_channels, hidden_dim, kernel_size=3, stride=5, padding=1),
+            nn.BatchNorm1d(hidden_dim),
+            nn.GELU(),
+        
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=4, padding=1),
+            nn.BatchNorm1d(hidden_dim),
+            nn.GELU(),
+        
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=4, padding=1),
+            nn.BatchNorm1d(hidden_dim),
+            nn.GELU(),
+        
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=4, padding=1),
+            nn.BatchNorm1d(hidden_dim),
+            nn.GELU()            
         )
         
     def forward(self, x):
@@ -42,7 +51,7 @@ class ContrastivePredictor(nn.Module):
     def forward(self, x):
         return self.project(x)
 
-class SSLAutoregressiveModel(nn.Module):
+class SSLModel(nn.Module):
     def __init__(self, feat_dim=128, proj_dim=128):
         super().__init__()
         self.encoder = FeatureEncoder()
@@ -52,15 +61,12 @@ class SSLAutoregressiveModel(nn.Module):
 
     def forward(self, x, mask=None, mask_prob=0.065, mask_length=10):
         # z -> true latent features
-
         z = self.encoder(x)
-            
         z = z.transpose(1, 2)
         B, T, F = z.shape
 
         # masking
         z_masked = z.clone()
-        
         if mask is None:
             mask = compute_mask_indices(B, T, mask_prob, mask_length, device=z.device)
         
