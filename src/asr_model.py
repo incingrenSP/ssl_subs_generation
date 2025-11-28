@@ -8,7 +8,7 @@ class ASRModel(nn.Module):
              for params in self.model.encoder.parameters():
                  params.requires_grad = False
 
-        self.fc = nn.Linear(128, vocab_size)
+        self.fc = nn.Linear(128, vocab_size+1)
         self.log_softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x):

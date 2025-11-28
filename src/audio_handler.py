@@ -25,6 +25,14 @@ class ASRDataset(Dataset):
         super().__init__()
         self.df = pd.read_csv(metadata_path, sep="\t")
         self.tokenizer = tokenizer
+        self.audio_paths = self.df['path'].tolist()
+        self.transcripts = self.df['transcript'].tolist()
+
+        self.encode_transcripts = []
+        for t in self.transcripts:
+            encoded = tokenizer.encode(t)
+            encoded = [i if i >= 0 else 0 for i in encoded]
+            self.encode_transcripts.append(torch.tensor(encoded, dtype=torch.long))
 
     def __len__(self):
         return len(self.df)
@@ -32,17 +40,15 @@ class ASRDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         waveform, sr = sf.read(row['path'], always_2d=True)
-            
         waveform = torch.tensor(waveform.T, dtype=torch.float32)
 
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
         waveform = waveform / torch.max(torch.abs(waveform))
-            
-        target = self.tokenizer.encode(row['transcript'])
+        target = self.encode_transcripts[idx]
         
-        return waveform.squeeze(0), torch.tensor(target, dtype=torch.long)
+        return waveform.squeeze(0), target
 
 class Tokenizer:
     def __init__(self, corpus_path, add_blank=True):        
@@ -83,13 +89,12 @@ def collate_padding_asr(batch):
     
     waveforms = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0)    
     waveforms = waveforms.unsqueeze(1)
-    
-    target_len = torch.tensor([target.size(0) for target in targets], dtype=torch.long)
+    targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=0)
 
-    # padding value -1 to not get nan cuz ctc is a bitch
-    targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=-1)
-    
-    return waveforms, targets, target_len
+    input_len = torch.tensor([wave.shape[-1] for wave in waveforms], dtype=torch.long)
+    target_len = torch.tensor([len(target) for target in targets], dtype=torch.long)
+
+    return waveforms, targets, input_len, target_len
 
 def load_text(text_path):
     all_text = ""
@@ -97,3 +102,10 @@ def load_text(text_path):
         with open(file, "r", encoding="utf-8") as f:
             all_text += f.read() + "\n"
     return all_text
+
+def flatten_targets(targets, target_lengths):
+    flattened = []
+    for i in range(targets.size(0)):
+        seq = targets[i, :target_lengths[i]]
+        flattened.append(seq)
+    return torch.cat(flattened)

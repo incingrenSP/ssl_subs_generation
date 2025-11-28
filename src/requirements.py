@@ -23,3 +23,5 @@ import pandas as pd
 import numpy as np
 
 import soundfile as sf
+
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
