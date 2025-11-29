@@ -50,35 +50,6 @@ class ASRDataset(Dataset):
         
         return waveform.squeeze(0), target
 
-class Tokenizer:
-    def __init__(self, corpus_path, add_blank=True):        
-        with open(corpus_path, 'r', encoding='utf-8') as f:
-            lines = [unicodedata.normalize('NFC', l.strip()) for l in f]
-
-        tokens = []
-        for line in lines:
-            tokens.extend(self.tokenize(line))
-
-        counter = Counter(tokens)
-        self.vocab = sorted(counter.keys())
-
-        if add_blank:
-            self.vocab = ['<blank>'] + self.vocab
-
-        self.token_to_id = {t: i for i, t in enumerate(self.vocab)}
-        self.id_to_token = {i: t for t, i in self.token_to_id.items()}
-
-    def tokenize(self, text):
-        text = unicodedata.normalize('NFC', text)
-        return regex.findall(r'\X', text)
-
-    def encode(self, text):
-        tokens = self.tokenize(text)
-        return [self.token_to_id[t] for t in tokens if t in self.token_to_id]
-
-    def decode(self, ids):
-        return ''.join([self.id_to_token[i] for i in ids if i in self.id_to_token])
-
 def collate_padding(batch):
     batch = rnn_utils.pad_sequence(batch, batch_first=True, padding_value=0)
     batch = batch.unsqueeze(1)
