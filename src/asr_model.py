@@ -21,20 +21,3 @@ class ASRModel(nn.Module):
         log_probs = self.log_softmax(logits)
 
         return log_probs
-
-# the coin change problem
-def greedy_decoding(log_probs, tokenizer, blank=0):
-    predictions = torch.argmax(log_probs, dim=-1)
-    results = []
-
-    for seq in predictions:
-        prev = blank
-        tokens = []
-        for t in seq:
-            t = t.items()
-            if t != prev and t != blank:
-                tokens.append(t)
-            prev = t
-
-        results.append(tokenizer.decode(tokens))
-    return results

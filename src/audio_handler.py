@@ -57,15 +57,31 @@ def collate_padding(batch):
 
 def collate_padding_asr(batch):
     waveforms, targets = zip(*batch)
+    raw_waveform_len = torch.tensor([len(w) for w in waveforms], dtype=torch.long)
     
-    waveforms = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0)    
+    waveforms = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0)
     waveforms = waveforms.unsqueeze(1)
+    
     targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=0)
-
-    input_len = torch.tensor([wave.shape[-1] for wave in waveforms], dtype=torch.long)
     target_len = torch.tensor([len(target) for target in targets], dtype=torch.long)
 
+    DOWNSAMPLING_FACTOR = 320 
+    input_len = torch.div(raw_waveform_len, DOWNSAMPLING_FACTOR, rounding_mode='floor')
+    
+    input_len[input_len == 0] = 1 
+
     return waveforms, targets, input_len, target_len
+
+# def collate_padding_asr(batch):
+#     waveforms, targets = zip(*batch)
+    
+#     waveforms = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0)    
+#     waveforms = waveforms.unsqueeze(1)
+#     targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=0)
+
+#     target_len = torch.tensor([len(target) for target in targets], dtype=torch.long)
+
+#     return waveforms, targets, target_len
 
 def load_text(text_path):
     all_text = ""
@@ -73,10 +89,3 @@ def load_text(text_path):
         with open(file, "r", encoding="utf-8") as f:
             all_text += f.read() + "\n"
     return all_text
-
-def flatten_targets(targets, target_lengths):
-    flattened = []
-    for i in range(targets.size(0)):
-        seq = targets[i, :target_lengths[i]]
-        flattened.append(seq)
-    return torch.cat(flattened)
