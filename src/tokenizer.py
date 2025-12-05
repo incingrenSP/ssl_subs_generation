@@ -45,21 +45,9 @@ class Tokenizer:
         print(f"Blank ID: {self.token_to_id.get('<blank>', 'Not Found')}")
 
     def tokenize(self, text):
-        text = unicodedata.normalize('NFKC', text)
-        CLEANUP_PATTERN = re.compile(r'[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\u00ad\u0000-\u001f]')
-        cleaned_text = CLEANUP_PATTERN.sub('', text)
-
-        parts = cleaned_text.split(' ')
         tokens = []
-        space_token = ' '
-
-        for i, part in enumerate(parts):
-            if part:
-                graphemes = regex.findall(r'\X', part)
-                tokens.extend(graphemes)
-
-            if i < len(parts) - 1:
-                tokens.append(space_token)
+        for char in text:
+            tokens.append(char)
         
         return tokens
 

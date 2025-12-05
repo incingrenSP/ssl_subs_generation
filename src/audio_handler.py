@@ -16,7 +16,13 @@ class AudioDataset(Dataset):
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
-        waveform = waveform / torch.max(torch.abs(waveform))
+        wave_np = waveform.squeeze(0).numpy()
+        trimmed, _ = librosa.effects.trim(wave_np, top_db=TOP_DB)
+        waveform = torch.tensor(trimmed, dtype=torch.float32).unsqueeze(0)
+
+        max_val = torch.max(torch.abs(waveform))
+        if max_val > 0:
+            waveform = waveform / max_val
 
         return waveform.squeeze(0)
 
@@ -45,15 +51,22 @@ class ASRDataset(Dataset):
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
-        waveform = waveform / torch.max(torch.abs(waveform))
+        wave_np = waveform.squeeze(0).numpy()
+        trimmed, _ = librosa.effects.trim(wave_np, top_db=TOP_DB)
+        waveform = torch.tensor(trimmed, dtype=torch.float32).unsqueeze(0)
+
+        max_val = torch.max(torch.abs(waveform))
+        if max_val > 1:
+            waveform = waveform / max_val
+        
         target = self.encode_transcripts[idx]
         
         return waveform.squeeze(0), target
 
 def collate_padding(batch):
-    batch = rnn_utils.pad_sequence(batch, batch_first=True, padding_value=0)
-    batch = batch.unsqueeze(1)
-    return batch
+    padded_batch = rnn_utils.pad_sequence(batch, batch_first=True, padding_value=0)
+    padded_batch = padded_batch.unsqueeze(1)
+    return padded_batch
 
 def collate_padding_asr(batch):
     waveforms, targets = zip(*batch)
@@ -71,17 +84,6 @@ def collate_padding_asr(batch):
     input_len[input_len == 0] = 1 
 
     return waveforms, targets, input_len, target_len
-
-# def collate_padding_asr(batch):
-#     waveforms, targets = zip(*batch)
-    
-#     waveforms = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0)    
-#     waveforms = waveforms.unsqueeze(1)
-#     targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=0)
-
-#     target_len = torch.tensor([len(target) for target in targets], dtype=torch.long)
-
-#     return waveforms, targets, target_len
 
 def load_text(text_path):
     all_text = ""

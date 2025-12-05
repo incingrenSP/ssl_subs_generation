@@ -30,7 +30,6 @@ class ContextModule(nn.Module):
         self.gru = nn.GRU(input_dim, hidden_dim, batch_first=True)
 
     def forward(self, z):
-        # natural autoregressive context representation
         output, _ = self.gru(z)
         return output
 
@@ -51,27 +50,20 @@ class SSLModel(nn.Module):
         self.target_proj = nn.Linear(feat_dim, proj_dim)
 
     def forward(self, x, mask=None, mask_prob=0.065, mask_length=10):
-        # z -> true latent features
+
         z = self.encoder(x)
         z = z.transpose(1, 2)
         B, T, F = z.shape
-
-        # masking
+        
         z_masked = z.clone()
         
         if mask is None:
             mask = compute_mask_indices(B, T, mask_prob, mask_length, device=z.device)
-        
-        # z_masked[torch.arange(z.size(0)).unsqueeze(1), mask_indices] = 0
+            
         z_masked[mask.unsqueeze(-1).expand_as(z_masked)] = 0
 
-        # c -> context
         c = self.context(z_masked)
-        
-        # q -> predicted queries
         q = self.predictor(c)
-
-        # projection
         z_proj = self.target_proj(z)
 
         return z_proj, q, mask
@@ -82,16 +74,19 @@ class ASRModel(nn.Module):
         self.model = ssl_model
         
         if freeze_ssl:
-             for params in self.model.encoder.parameters():
-                 params.requires_grad = False
+            for params in self.model.encoder.parameters():
+                params.requires_grad = False
 
-        self.fc = nn.Linear(128, vocab_size+1)
+        for module in self.model.modules():
+            if isinstance(module, torch.nn.BatchNorm1d):
+                module.eval()
+
+        self.fc = nn.Linear(512, vocab_size+1)
         self.log_softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x):
         z = self.model.encoder(x)
         z = z.transpose(1, 2)
-
         c = self.model.context(z)
 
         logits = self.fc(c)
@@ -108,7 +103,7 @@ class InferenceModel(nn.Module):
         vocab_size = len(self.tokenizer.vocab)
         
         dummy_ssl = SSLModel()
-        self.asr_model = ASRModel(dummy_ssl, vocab_size).to(device)
+        self.asr_model = ASRModel(dummy_ssl, vocab_size-1)
 
         asr_checkpoint = torch.load(decoder)
         self.asr_model.load_state_dict(asr_checkpoint['model_state_dict'])
@@ -132,11 +127,25 @@ class InferenceModel(nn.Module):
         return results
 
     def forward(self, waveform, sr):
+        waveform = torch.tensor(waveform, dtype=torch.float32)
+
+        if waveform.ndim == 2:
+            waveform = waveform.T
+            waveform = waveform.mean(dim=0, keepdim=True)
+        elif waveform.ndim == 1:
+            waveform = waveform.unsqueeze(0)
+            
+        max_val = waveform.abs().max()
+        if max_val > 0:
+            waveform = waveform / max_val
+        
         if sr != 16_000:
             waveform = torchaudio.functional.resample(waveform, sr, 16_000)
 
+        waveform = waveform.unsqueeze(0)
+                
         with torch.no_grad():
-            log_probs = self.decoder(waveform)
+            log_probs = self.asr_model(waveform)
             log_probs = log_probs[0]
 
         ids = self.greedy_decode(log_probs)
