@@ -53,10 +53,12 @@ class Tokenizer:
 
     def encode(self, text):
         tokens = self.tokenize(text)
-        return [self.token_to_id[t] for t in tokens if t in self.token_to_id]
+        output = [self.token_to_id[t] for t in tokens if t in self.token_to_id]
+        return output
 
     def decode(self, ids):
-        return ''.join([self.id_to_token[i] for i in ids if i in self.id_to_token])
+        output = ''.join([self.id_to_token[i] for i in ids])
+        return output
 
     def save(self, path):
         data = {"vocab": self.vocab}

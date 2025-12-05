@@ -72,27 +72,38 @@ class ASRModel(nn.Module):
     def __init__(self, ssl_model, vocab_size, freeze_ssl=True):
         super().__init__()
         self.model = ssl_model
-        
+
         if freeze_ssl:
-            for params in self.model.encoder.parameters():
-                params.requires_grad = False
+            for p in self.model.encoder.parameters():
+                p.requires_grad = False
 
         for module in self.model.modules():
-            if isinstance(module, torch.nn.BatchNorm1d):
+            if isinstance(module, nn.BatchNorm1d):
                 module.eval()
+                module.track_running_stats = False
 
-        self.fc = nn.Linear(512, vocab_size+1)
-        self.log_softmax = nn.LogSoftmax(dim=-1)
+        self.norm = nn.LayerNorm(128)
+        
+        self.decoder_rnn = nn.LSTM(
+            input_size=128,
+            hidden_size=256,
+            num_layers=2,
+            batch_first=True,
+            bidirectional=True
+        )
+
+        self.fc = nn.Linear(512, vocab_size + 1)
 
     def forward(self, x):
         z = self.model.encoder(x)
         z = z.transpose(1, 2)
         c = self.model.context(z)
 
-        logits = self.fc(c)
-        log_probs = self.log_softmax(logits)
+        c = self.norm(c)
+        c, _ = self.decoder_rnn(c)
 
-        return log_probs
+        logits = self.fc(c)
+        return logits
 
 class InferenceModel(nn.Module):
     def __init__(self, encoder, decoder, tokenizer, tokenClass, device="cpu"):
