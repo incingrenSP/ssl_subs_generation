@@ -6,6 +6,8 @@ class Tokenizer:
             self.vocab = vocab
             self.token_to_id = {t: i for i, t in enumerate(self.vocab)}
             self.id_to_token = {i: t for t, i in self.token_to_id.items()}
+            print(f"Final Vocabulary Size after filtering: {len(self.vocab)}")
+            print(f"Blank ID: {self.token_to_id.get('<blank>', 'Not Found')}")
             return
         
         with open(corpus_path, 'r', encoding='utf-8') as f:
@@ -14,23 +16,32 @@ class Tokenizer:
         tokens = []
         for line in lines:
             tokens.extend(self.tokenize(line))
-            
-        CHARACTER_WHITELIST = set([
-            'अ', 'आ', 'इ', 'ई', 'उ', 'ऊ', 'ऋ',
+
+        vowels = [
+            'अ', 'आ', 'इ', 'ई', 'उ', 'ऊ', 'ऋ', 
             'ए', 'ऐ', 'ओ', 'औ', 'अं', 'अः',
+        ]
+        special_chars = [
+            '०', '१', '२', '३', '४', '५', '६', '७', '८', '९', '।', ',', '?', '!', '-', '(', ')', '"', "'", ' '
+        ]
+        consonants = [
             'क', 'ख', 'ग', 'घ', 'ङ',
             'च', 'छ', 'ज', 'झ', 'ञ',
             'ट', 'ठ', 'ड', 'ढ', 'ण',
             'त', 'थ', 'द', 'ध', 'न',
             'प', 'फ', 'ब', 'भ', 'म',
             'य', 'र', 'ल', 'व',
-            'श', 'ष', 'स', 'ह', 'क्ष', 'त्र', 'ज्ञ',
-            'ा', 'ि', 'ी', 'ु', 'ू', 'ृ', 'ॄ', 'े', 'ैे', 'ो', 'ौ', 'ँ', 'ं', 'ः',
-            '०', '१', '२', '३', '४', '५', '६', '७', '८', '९',
-            '।', ',', '.', '?', '!', '"', "'", '-',
-            ' '
-        ])
+            'श', 'ष', 'स', 'ह',
+            'क्ष', 'त्र', 'ज्ञ'
+        ]
+        matras = [
+            "", "ा", "ि", "ी", "ु", "ू", "े",
+            "ै", "ो", "ौ", "ं", "ः", "ँ", "्"
+        ]
+        # half_letters = []
 
+        CHARACTER_WHITELIST = set(vowels + self._gen_vocab(consonants, matras) + special_chars)
+        
         filtered_tokens = [token for token in tokens if token in CHARACTER_WHITELIST]
         counter = Counter(filtered_tokens)
         self.vocab = sorted(counter.keys())
@@ -44,11 +55,48 @@ class Tokenizer:
         print(f"Final Vocabulary Size after filtering: {len(self.vocab)}")
         print(f"Blank ID: {self.token_to_id.get('<blank>', 'Not Found')}")
 
+    def _gen_vocab(self, consonants, matras):
+        vocabs = []
+        for c in consonants:
+            for m in matras:
+                vocabs.append(c + m)
+        return vocabs
+
+    def _split_grapheme(self, token):
+        sp_keyword = '्'
+        if sp_keyword not in token:
+            return [token]
+        parts = []
+        temp = ''
+    
+        for char in token:
+            temp += char
+            if char in sp_keyword:
+                parts.append(temp)
+                temp = ''
+    
+        if temp:
+            parts.append(temp)
+    
+        return parts
+
     def tokenize(self, text):
+        text = unicodedata.normalize('NFKC', text)
+        CLEANUP_PATTERN = re.compile(r'[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\u00ad\u0000-\u001f]')
+        cleaned_text = CLEANUP_PATTERN.sub('', text)
+        parts = cleaned_text.split(' ')
         tokens = []
-        for char in text:
-            tokens.append(char)
+        space_token = ' '
         
+        for i, part in enumerate(parts):
+            if part:
+                graphemes = regex.findall(r'\X', part)
+                for g in graphemes:
+                    tokens.extend(self._split_grapheme(g))
+        
+            if i < len(parts) - 1:
+                tokens.append(space_token)
+                
         return tokens
 
     def encode(self, text):

@@ -74,14 +74,14 @@ def collate_padding_asr(batch):
     
     waveforms = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0)
     waveforms = waveforms.unsqueeze(1)
-    
-    targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=0)
+
+    # targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=0)
     target_len = torch.tensor([len(target) for target in targets], dtype=torch.long)
 
     DOWNSAMPLING_FACTOR = 320 
     input_len = torch.div(raw_waveform_len, DOWNSAMPLING_FACTOR, rounding_mode='floor')
     
-    input_len[input_len == 0] = 1 
+    input_len[input_len == 0] = 1
 
     return waveforms, targets, input_len, target_len
 

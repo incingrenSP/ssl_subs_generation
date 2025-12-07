@@ -93,6 +93,7 @@ class ASRModel(nn.Module):
         )
 
         self.fc = nn.Linear(512, vocab_size + 1)
+        self.log_softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x):
         z = self.model.encoder(x)
@@ -103,6 +104,8 @@ class ASRModel(nn.Module):
         c, _ = self.decoder_rnn(c)
 
         logits = self.fc(c)
+        log_probs = self.log_softmax(logits)
+        
         return logits
 
 class InferenceModel(nn.Module):
@@ -145,24 +148,29 @@ class InferenceModel(nn.Module):
             waveform = waveform.mean(dim=0, keepdim=True)
         elif waveform.ndim == 1:
             waveform = waveform.unsqueeze(0)
+
+        wave_np = waveform.squeeze(0).numpy()
+        trimmed, _ = librosa.effects.trim(wave_np, top_db=TOP_DB)
+        waveform = torch.tensor(trimmed, dtype=torch.float32).unsqueeze(0)
             
         max_val = waveform.abs().max()
         if max_val > 0:
             waveform = waveform / max_val
-        
+
         if sr != 16_000:
             waveform = torchaudio.functional.resample(waveform, sr, 16_000)
 
         waveform = waveform.unsqueeze(0)
                 
         with torch.no_grad():
-            log_probs = self.asr_model(waveform)
+            logits = self.asr_model(waveform)
+            log_probs = F.log_softmax(logits, dim=-1)
             log_probs = log_probs[0]
 
         ids = self.greedy_decode(log_probs)
         text = self.tokenizer.decode(ids)
 
-        return text
+        return logits
 
 def compute_mask_indices(B, T, mask_prob, mask_length, device="cpu"):
     mask = torch.zeros(B, T, dtype=torch.bool, device=device)
@@ -175,12 +183,3 @@ def compute_mask_indices(B, T, mask_prob, mask_length, device="cpu"):
             mask[b, s : s + mask_length] = True
             
     return mask
-
-def flatten_targets(targets, target_lengths):
-    flattened = []
-    
-    for i in range(targets.size(0)):
-        seq = targets[i, :target_lengths[i]]
-        flattened.append(seq)
-        
-    return torch.cat(flattened)
