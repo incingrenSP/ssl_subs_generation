@@ -5,12 +5,18 @@ class ASRModel(nn.Module):
         super().__init__()
         self.model = ssl_model
 
-        if freeze_ssl:
-            for p in self.model.encoder.parameters():
-                p.requires_grad = False
+        if frozen_ssl:
+            for module in [self.model.encoder, self.model.context]:
+                for p in module.parameters():
+                    p.requires_grad = False
         else:
-            for p in self.model.encoder.parameters():
-                p.requires_grad = True
+            for module in [self.model.encoder, self.model.context]:
+                for p in module.parameters():
+                    p.requires_grad = True
+
+        for module in [self.model.encoder_m, self.model.context_m, self.model.target_proj_m]:
+            for p in module.parameters():
+                module.requires_grad = False
 
         self.norm = nn.LayerNorm(128)
         
@@ -25,10 +31,13 @@ class ASRModel(nn.Module):
         self.fc = nn.Linear(512, vocab_size + 1)
         self.log_softmax = nn.LogSoftmax(dim=-1)
 
-    def forward(self, x):
-        z = self.model.encoder(x)
+    def extract_features(self, x):
+        z = self.encoder(x)
         z = z.transpose(1, 2)
-        c = self.model.context(z)
+        return self.context(z)
+
+    def forward(self, x):
+        c = self.model.extract_features(x)
 
         c = self.norm(c)
         c, _ = self.decoder_rnn(c)
@@ -36,4 +45,4 @@ class ASRModel(nn.Module):
         logits = self.fc(c)
         log_probs = self.log_softmax(logits)
         
-        return logits
+        return log_probs
