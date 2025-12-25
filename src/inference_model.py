@@ -12,7 +12,7 @@ class InferenceModel(nn.Module):
         vocab_size = len(self.tokenizer.vocab)
         
         dummy_ssl = SSLModel()
-        self.asr_model = ASRModel(dummy_ssl, vocab_size-1)
+        self.asr_model = ASRModel(dummy_ssl, vocab_size-1, True)
 
         asr_checkpoint = torch.load(decoder)
         self.asr_model.load_state_dict(asr_checkpoint['model_state_dict'])

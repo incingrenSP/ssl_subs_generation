@@ -60,7 +60,7 @@ class SSLModel(nn.Module):
             nn.Linear(feat_dim, proj_dim)
         )
 
-        # momentum networks
+        # momentum networks (exponential moving average)
         self.momentum = m
         self.encoder_m = FeatureEncoder()
         self.context_m = ContextModule(feat_dim, feat_dim)
@@ -90,9 +90,9 @@ class SSLModel(nn.Module):
                 p_t.data = p_t.data * m + p_o.data * (1.0 - m)
 
     def extract_features(self, x):
-        z = encoder(x)
+        z = self.encoder(x)
         z = z.transpose(1, 2)
-        return context(z)
+        return self.context(z)
 
     def forward(self, x, mask=None, mask_prob=0.5, mask_length=10):
         B = x.size(0)

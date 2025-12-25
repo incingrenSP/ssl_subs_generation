@@ -40,7 +40,8 @@ class Tokenizer:
         ]
         # half_letters = []
 
-        CHARACTER_WHITELIST = set(vowels + self._gen_vocab(consonants, matras) + special_chars)
+        # CHARACTER_WHITELIST = set(vowels + self._gen_vocab(consonants, matras) + special_chars)
+        CHARACTER_WHITELIST = set(vowels + consonants + matras + special_chars)
         
         filtered_tokens = [token for token in tokens if token in CHARACTER_WHITELIST]
         counter = Counter(filtered_tokens)
@@ -92,7 +93,8 @@ class Tokenizer:
             if part:
                 graphemes = regex.findall(r'\X', part)
                 for g in graphemes:
-                    tokens.extend(self._split_grapheme(g))
+                    # tokens.extend(self._split_grapheme(g))
+                    tokens.extend(g)
         
             if i < len(parts) - 1:
                 tokens.append(space_token)

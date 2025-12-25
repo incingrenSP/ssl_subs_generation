@@ -1,11 +1,11 @@
 from src.requirements import *
 
 class ASRModel(nn.Module):
-    def __init__(self, ssl_model, vocab_size, freeze_ssl=True):
+    def __init__(self, ssl_model, vocab_size, freeze_ssl):
         super().__init__()
         self.model = ssl_model
 
-        if frozen_ssl:
+        if freeze_ssl:
             for module in [self.model.encoder, self.model.context]:
                 for p in module.parameters():
                     p.requires_grad = False
@@ -16,7 +16,12 @@ class ASRModel(nn.Module):
 
         for module in [self.model.encoder_m, self.model.context_m, self.model.target_proj_m]:
             for p in module.parameters():
-                module.requires_grad = False
+                p.requires_grad = False
+
+        for module in self.model.modules():
+            if isinstance(module, nn.BatchNorm1d):
+                module.eval()
+                module.track_running_stats = False
 
         self.norm = nn.LayerNorm(128)
         
@@ -31,13 +36,9 @@ class ASRModel(nn.Module):
         self.fc = nn.Linear(512, vocab_size + 1)
         self.log_softmax = nn.LogSoftmax(dim=-1)
 
-    def extract_features(self, x):
-        z = self.encoder(x)
-        z = z.transpose(1, 2)
-        return self.context(z)
-
     def forward(self, x):
         c = self.model.extract_features(x)
+        # c = self.extract_features(x)
 
         c = self.norm(c)
         c, _ = self.decoder_rnn(c)
