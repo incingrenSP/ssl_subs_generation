@@ -40,8 +40,8 @@ class Tokenizer:
         ]
         # half_letters = []
 
-        # CHARACTER_WHITELIST = set(vowels + self._gen_vocab(consonants, matras) + special_chars)
-        CHARACTER_WHITELIST = set(vowels + consonants + matras + special_chars)
+        CHARACTER_WHITELIST = set(vowels + self._gen_vocab(consonants, matras) + special_chars)
+        # CHARACTER_WHITELIST = set(vowels + consonants + matras + special_chars)
         
         filtered_tokens = [token for token in tokens if token in CHARACTER_WHITELIST]
         counter = Counter(filtered_tokens)

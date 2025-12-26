@@ -1,5 +1,6 @@
 /data/audio/
 /data/text/
+/data/corpus.txt
 /data/
 /.ipynb_checkpoints/
 /src/__pycache__/
@@ -7,4 +8,4 @@
 /.ipynb_checkpoints/
 /models/
 /models.rar
-/data/corpus.txt
+
