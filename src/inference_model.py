@@ -17,6 +17,8 @@ class InferenceModel(nn.Module):
         asr_checkpoint = torch.load(decoder)
         self.asr_model.load_state_dict(asr_checkpoint['model_state_dict'])
         self.asr_model.eval()
+        self.asr_model.model.encoder.eval()
+        self.asr_model.model.context.eval()
 
     def greedy_decode(self, log_probs):
         prediction_ids = torch.argmax(log_probs, dim=-1)

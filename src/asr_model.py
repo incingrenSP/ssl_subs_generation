@@ -3,8 +3,8 @@ from src.requirements import *
 class SpecAugment(nn.Module):
     def __init__(self):
         super().__init__()
-        self.time_mask = T.TimeMasking(time_mask_params=20)
-        self.freq_mask = T,FrequencyMasking(freq_mask_param=16)
+        self.time_mask = T.TimeMasking(time_mask_param=8)
+        self.freq_mask = T.FrequencyMasking(freq_mask_param=4)
 
     def forward(self, x):
         # only works in train() mode
@@ -45,36 +45,55 @@ class ASRModel(nn.Module):
         
         self.norm = nn.LayerNorm(128)
         
-        self.decoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(
-                d_model = 128,
-                nhead = 4,
-                dim_feedforward = 512,
-                dropout = 0.1,
-                batch_first = True
-            ),
-            num_layers = 6
+        # self.decoder = nn.TransformerEncoder(
+        #     nn.TransformerEncoderLayer(
+        #         d_model = 128,
+        #         nhead = 4,
+        #         dim_feedforward = 512,
+        #         dropout = 0.1,
+        #         batch_first = True
+        #     ),
+        #     num_layers = 6
+        # )
+
+        self.decoder = nn.LSTM(
+            input_size=128,
+            hidden_size=256,
+            num_layers=3,
+            batch_first=True,
+            bidirectional=True,
+            dropout=0.1
         )
 
         self.proj = nn.Sequential(
-            nn.Linear(128, 256),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            
-            nn.Linear(256, 512),
-            nn.GELU(),
+            nn.Linear(512, 256),
+            nn.LayerNorm(256),
             nn.Dropout(0.1)
         )
-        self.fc = nn.Linear(512, vocab_size + 1)
+        self.fc = nn.Linear(256, vocab_size + 1)
         self.log_softmax = nn.LogSoftmax(dim=-1)
 
-    def forward(self, x):
+    def create_padding_mask(self, features, lengths):
+        batch_size, max_len, _ = features.size()
+
+        indices = torch.arange(max_len).to(features.device)
+        mask = indices.unsqueeze(0) >= lengths.unsqueeze(1)
+
+        return mask
+
+    def forward(self, x, lengths=None):
         c = self.model.extract_features(x)
+
+        padding_mask = None
+        if lengths is not None:
+            padding_mask = self.create_padding_mask(c, lengths)
+        
         c = self.spec_augment(c)
-
         c = self.norm(c)
-        c = self.decoder(c)
-
+        # c = self.decoder(c, src_key_padding_mask=padding_mask)
+        c, _ = self.decoder(c)
+        c = self.proj(c)
+        
         logits = self.fc(c)
         log_probs = self.log_softmax(logits)
         

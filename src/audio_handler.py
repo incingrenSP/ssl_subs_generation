@@ -16,9 +16,9 @@ class AudioDataset(Dataset):
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
-        # wave_np = waveform.squeeze(0).numpy()
-        # trimmed, _ = librosa.effects.trim(wave_np, top_db=TOP_DB)
-        # waveform = torch.tensor(trimmed, dtype=torch.float32).unsqueeze(0)
+        wave_np = waveform.squeeze(0).numpy()
+        trimmed, _ = librosa.effects.trim(wave_np, top_db=TOP_DB)
+        waveform = torch.tensor(trimmed, dtype=torch.float32).unsqueeze(0)
 
         max_val = torch.max(torch.abs(waveform))
         if max_val > 0:
@@ -51,9 +51,9 @@ class ASRDataset(Dataset):
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
-        # wave_np = waveform.squeeze(0).numpy()
-        # trimmed, _ = librosa.effects.trim(wave_np, top_db=TOP_DB)
-        # waveform = torch.tensor(trimmed, dtype=torch.float32).unsqueeze(0)
+        wave_np = waveform.squeeze(0).numpy()
+        trimmed, _ = librosa.effects.trim(wave_np, top_db=TOP_DB)
+        waveform = torch.tensor(trimmed, dtype=torch.float32).unsqueeze(0)
 
         max_val = torch.max(torch.abs(waveform))
         if max_val > 1:

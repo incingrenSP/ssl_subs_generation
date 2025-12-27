@@ -40,8 +40,8 @@ class Tokenizer:
         ]
         # half_letters = []
 
-        CHARACTER_WHITELIST = set(vowels + self._gen_vocab(consonants, matras) + special_chars)
-        # CHARACTER_WHITELIST = set(vowels + consonants + matras + special_chars)
+        # CHARACTER_WHITELIST = set(vowels + self._gen_vocab(consonants, matras) + special_chars)
+        CHARACTER_WHITELIST = set(vowels + consonants + matras + special_chars)
         
         filtered_tokens = [token for token in tokens if token in CHARACTER_WHITELIST]
         counter = Counter(filtered_tokens)
@@ -83,6 +83,11 @@ class Tokenizer:
 
     def tokenize(self, text):
         text = unicodedata.normalize('NFKC', text)
+        tokens = list(text)
+        return tokens
+        
+    def _tokenize(self, text):
+        text = unicodedata.normalize('NFKC', text)
         CLEANUP_PATTERN = re.compile(r'[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\u00ad\u0000-\u001f]')
         cleaned_text = CLEANUP_PATTERN.sub('', text)
         parts = cleaned_text.split(' ')
@@ -94,7 +99,7 @@ class Tokenizer:
                 graphemes = regex.findall(r'\X', part)
                 for g in graphemes:
                     # tokens.extend(self._split_grapheme(g))
-                    tokens.extend(g)
+                    tokens.append(g)
         
             if i < len(parts) - 1:
                 tokens.append(space_token)
