@@ -21,6 +21,7 @@ import re
 from collections import Counter
 import json
 import random
+import copy
 
 import pandas as pd
 import numpy as np

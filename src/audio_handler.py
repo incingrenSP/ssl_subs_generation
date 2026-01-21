@@ -26,6 +26,42 @@ class AudioDataset(Dataset):
 
         return waveform.squeeze(0)
 
+class ABXDataset(Dataset):
+    def __init__(self, metadata_path, segment_len=32000): # e.g., 2 seconds at 16k
+        self.df = pd.read_csv(metadata_path, sep="\t")
+        self.segment_len = segment_len
+
+    def __len__(self):
+        return len(self.df)
+
+    def _get_segment(self, path):
+        waveform, _ = sf.read(path, always_2d=True)
+        waveform = torch.tensor(waveform.T, dtype=torch.float32).mean(dim=0)
+        
+        # Ensure it's long enough, else pad
+        if waveform.shape[0] < self.segment_len:
+            waveform = F.pad(waveform, (0, self.segment_len - waveform.shape[0]))
+        
+        # Random crop
+        start = torch.randint(0, waveform.shape[0] - self.segment_len + 1, (1,)).item()
+        return waveform[start : start + self.segment_len]
+
+    def __getitem__(self, idx):
+        path_a = self.df.iloc[idx]['path']
+        
+        # A and X are two different crops/augments of the same file
+        anchor = self._get_segment(path_a)
+        positive = self._get_segment(path_a) 
+        
+        # B is a random different file
+        random_idx = torch.randint(0, len(self.df), (1,)).item()
+        while random_idx == idx:
+            random_idx = torch.randint(0, len(self.df), (1,)).item()
+        
+        negative = self._get_segment(self.df.iloc[random_idx]['path'])
+        
+        return anchor, positive, negative
+
 class ASRDataset(Dataset):
     def __init__(self, metadata_path, tokenizer):
         super().__init__()
@@ -91,3 +127,26 @@ def load_text(text_path):
         with open(file, "r", encoding="utf-8") as f:
             all_text += f.read() + "\n"
     return all_text
+
+@torch.no_grad()
+def run_abx_val(model, abx_loader, device):
+    model.eval()
+    correct = 0
+    total = 0
+    
+    for a, p, n in tqdm(abx_loader):
+        a, p, n = a.to(device).unsqueeze(1), p.to(device).unsqueeze(1), n.to(device).unsqueeze(1)
+        
+        feat_a = model.extract_features(a).mean(dim=1)
+        feat_p = model.extract_features(p).mean(dim=1)
+        feat_n = model.extract_features(n).mean(dim=1)
+        
+        sim_pos = F.cosine_similarity(feat_a, feat_p)
+        sim_neg = F.cosine_similarity(feat_a, feat_n)
+        
+        correct += (sim_pos > sim_neg).sum().item()
+        total += a.size(0)
+    
+    accuracy = correct / total
+    print(f"ABX Discrimination Accuracy: {accuracy:.2%}")
+    return accuracy
