@@ -23,23 +23,19 @@ class ASRModel(nn.Module):
         super().__init__()
         self.model = ssl_model
 
-        if freeze_ssl:
-            for module in [self.model.encoder, self.model.context]:
-                for p in module.parameters():
-                    p.requires_grad = False
-        else:
-            for module in [self.model.encoder, self.model.context]:
-                for p in module.parameters():
-                    p.requires_grad = True
+        self._set_requires_grad(self.model.encoder, False)
 
-        for module in [self.model.encoder_m, self.model.context_m, self.model.target_proj_m]:
+        self._set_requires_grad(self.model.context, False)
+
+        # check ssl_model.py for more information
+        N = 1
+        for layer in self.model.context.layers[-N:]:
+            self._set_requires_grad(layer, True)
+
+        # Freeze momentum models
+        for module in [self.model.encoder_m, self.model.context_m, self.model.projector_m]:
             for p in module.parameters():
                 p.requires_grad = False
-
-        for module in self.model.modules():
-            if isinstance(module, nn.BatchNorm1d):
-                module.eval()
-                module.track_running_stats = False
 
         self.spec_augment = SpecAugment()
         
@@ -57,21 +53,25 @@ class ASRModel(nn.Module):
         # )
 
         self.decoder = nn.LSTM(
-            input_size=128,
+            input_size=256,
             hidden_size=256,
-            num_layers=3,
+            num_layers=2,
             batch_first=True,
             bidirectional=True,
             dropout=0.1
         )
 
         self.proj = nn.Sequential(
-            nn.Linear(512, 256),
+            nn.Linear(128, 256),
             nn.LayerNorm(256),
             nn.Dropout(0.1)
         )
         self.fc = nn.Linear(256, vocab_size + 1)
         self.log_softmax = nn.LogSoftmax(dim=-1)
+
+    def _set_requires_grad(self, module, req):
+        for p in module.parameters():
+            p.requires_grad = req
 
     def create_padding_mask(self, features, lengths):
         batch_size, max_len, _ = features.size()
@@ -82,6 +82,8 @@ class ASRModel(nn.Module):
         return mask
 
     def forward(self, x, lengths=None):
+
+        #trying ssl -> linear -> ln -> bilstm -> ctc
         c = self.model.extract_features(x)
 
         padding_mask = None
@@ -89,10 +91,11 @@ class ASRModel(nn.Module):
             padding_mask = self.create_padding_mask(c, lengths)
         
         c = self.spec_augment(c)
+        c = self.proj(c)
         c = self.norm(c)
         # c = self.decoder(c, src_key_padding_mask=padding_mask)
         c, _ = self.decoder(c)
-        c = self.proj(c)
+        
         
         logits = self.fc(c)
         log_probs = self.log_softmax(logits)

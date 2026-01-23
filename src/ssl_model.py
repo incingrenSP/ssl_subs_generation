@@ -80,7 +80,7 @@ class SSLModel(nn.Module):
         )
         self.predictor = Predictor(proj_dim, proj_dim)
 
-        # momentum networks (EMA)
+        # momentum networks
         self.momentum = m
         self.encoder_m = copy.deepcopy(self.encoder)
         self.context_m = copy.deepcopy(self.context)
