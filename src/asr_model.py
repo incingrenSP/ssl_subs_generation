@@ -1,103 +1,171 @@
 from src.requirements import *
+from src.tokenizer import *
+from src.ssl_model import *
 
-class SpecAugment(nn.Module):
-    def __init__(self):
+class MultiScaleFeatureExtractor(nn.Module):
+    def __init__(self, input_dim=128, output_dim=128):
         super().__init__()
-        self.time_mask = T.TimeMasking(time_mask_param=8)
-        self.freq_mask = T.FrequencyMasking(freq_mask_param=4)
-
-    def forward(self, x):
-        # only works in train() mode
-        if not self.training:
-            return x
-
-        x = x.transpose(1, 2)
-        x = self.time_mask(x)
-        x = self.freq_mask(x)
-        x = x.transpose(1, 2)
-
-        return x        
-
-class ASRModel(nn.Module):
-    def __init__(self, ssl_model, vocab_size, freeze_ssl):
-        super().__init__()
-        self.model = ssl_model
-
-        self._set_requires_grad(self.model.encoder, False)
-
-        self._set_requires_grad(self.model.context, False)
-
-        # check ssl_model.py for more information
-        N = 1
-        for layer in self.model.context.layers[-N:]:
-            self._set_requires_grad(layer, True)
-
-        # Freeze momentum models
-        for module in [self.model.encoder_m, self.model.context_m, self.model.projector_m]:
-            for p in module.parameters():
-                p.requires_grad = False
-
-        self.spec_augment = SpecAugment()
         
-        self.norm = nn.LayerNorm(128)
+        # Different temporal scales
+        self.local = nn.Conv1d(input_dim, output_dim // 4, kernel_size=3, padding=1, groups=1)
+        self.medium = nn.Conv1d(input_dim, output_dim // 4, kernel_size=7, padding=3, groups=1)
+        self.global_pool = nn.AdaptiveAvgPool1d(1)
+        self.global_fc = nn.Linear(input_dim, output_dim // 4)
         
-        # self.decoder = nn.TransformerEncoder(
-        #     nn.TransformerEncoderLayer(
-        #         d_model = 128,
-        #         nhead = 4,
-        #         dim_feedforward = 512,
-        #         dropout = 0.1,
-        #         batch_first = True
-        #     ),
-        #     num_layers = 6
-        # )
-
-        self.decoder = nn.LSTM(
-            input_size=256,
-            hidden_size=256,
-            num_layers=2,
-            batch_first=True,
-            bidirectional=True,
-            dropout=0.1
-        )
-
-        self.proj = nn.Sequential(
-            nn.Linear(128, 256),
-            nn.LayerNorm(256),
+        # Learnable combination
+        self.combine = nn.Sequential(
+            nn.Linear(output_dim // 4 * 3, output_dim),
+            nn.LayerNorm(output_dim),
+            nn.GELU(),
             nn.Dropout(0.1)
         )
-        self.fc = nn.Linear(256, vocab_size + 1)
-        self.log_softmax = nn.LogSoftmax(dim=-1)
-
-    def _set_requires_grad(self, module, req):
-        for p in module.parameters():
-            p.requires_grad = req
-
-    def create_padding_mask(self, features, lengths):
-        batch_size, max_len, _ = features.size()
-
-        indices = torch.arange(max_len).to(features.device)
-        mask = indices.unsqueeze(0) >= lengths.unsqueeze(1)
-
-        return mask
-
-    def forward(self, x, lengths=None):
-
-        #trying ssl -> linear -> ln -> bilstm -> ctc
-        c = self.model.extract_features(x)
-
-        padding_mask = None
-        if lengths is not None:
-            padding_mask = self.create_padding_mask(c, lengths)
         
-        c = self.spec_augment(c)
-        c = self.proj(c)
-        c = self.norm(c)
-        # c = self.decoder(c, src_key_padding_mask=padding_mask)
-        c, _ = self.decoder(c)
+        # Residual projection
+        self.residual_proj = nn.Linear(input_dim, output_dim)
         
+    def forward(self, x):
+        batch, seq_len, dim = x.shape
         
-        logits = self.fc(c)
-        log_probs = self.log_softmax(logits)
+        # Transpose for conv1d: (batch, dim, seq_len)
+        x_t = x.transpose(1, 2)
+        
+        # Multi-scale features
+        local_feat = self.local(x_t).transpose(1, 2)  # (batch, seq_len, dim//4)
+        medium_feat = self.medium(x_t).transpose(1, 2)  # (batch, seq_len, dim//4)
+        
+        # Global context
+        global_feat = self.global_pool(x_t).squeeze(-1)  # (batch, dim)
+        global_feat = self.global_fc(global_feat)  # (batch, dim//4)
+        global_feat = global_feat.unsqueeze(1).expand(-1, seq_len, -1)  # (batch, seq_len, dim//4)
+        
+        # Concatenate
+        combined = torch.cat([local_feat, medium_feat, global_feat], dim=-1)
+        
+        # Mix and project
+        output = self.combine(combined)
+        
+        # Residual connection
+        output = output + self.residual_proj(x)
+        
+        return output
+        
+
+class ASRModel(nn.Module):
+    def __init__(self, ssl_model, vocab_size, hidden_dim=256, num_layers=4, dropout=0.1):
+        super().__init__()
+        
+        # SSL components (frozen)
+        self.encoder = ssl_model.encoder
+        self.context = ssl_model.context
+        
+        # Multi-scale feature extraction
+        self.multiscale = MultiScaleFeatureExtractor(128, 128)
+        
+        # Diversification layer
+        self.diversify = nn.Sequential(
+            nn.Linear(128, 256),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(256, 128),
+            nn.Dropout(dropout)
+        )
+        
+        # Bi-LSTM layers
+        self.lstm = nn.LSTM(
+            input_size=128,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=True,
+            dropout=dropout if num_layers > 1 else 0
+        )
+        
+        # Project bi-directional output back to single dimension
+        self.projection = nn.Linear(hidden_dim * 2, 128)
+        
+        # Output layer
+        self.symbol = nn.Linear(128, vocab_size)
+        
+        self._init_weights()
+    
+    def _init_weights(self):
+        """Initialize weights."""
+        for name, param in self.lstm.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
+        
+        nn.init.xavier_uniform_(self.projection.weight)
+        nn.init.zeros_(self.projection.bias)
+        nn.init.xavier_uniform_(self.symbol.weight)
+        nn.init.zeros_(self.symbol.bias)
+    
+    def forward(self, x, input_lengths=None):
+        """
+        Forward pass.
+        
+        Args:
+            x: (batch, channels, samples)
+            input_lengths: (batch,) - sequence lengths after downsampling
+        
+        Returns:
+            log_probs: (seq_len, batch, vocab_size) for CTC
+        """
+        # Extract SSL features (frozen)
+        with torch.no_grad():
+            z = self.encoder(x).transpose(1, 2)  # (batch, time, features)
+            z = self.context(z)
+        
+        # Multi-scale feature extraction
+        z = self.multiscale(z)
+        z = z + self.diversify(z)  # Residual connection
+        
+        # Pack sequences if lengths provided (for efficiency)
+        if input_lengths is not None:
+            z = nn.utils.rnn.pack_padded_sequence(
+                z, 
+                input_lengths.cpu(), 
+                batch_first=True, 
+                enforce_sorted=False
+            )
+        
+        # Bi-LSTM
+        z, _ = self.lstm(z)
+        
+        # Unpack sequences
+        if input_lengths is not None:
+            z, _ = nn.utils.rnn.pad_packed_sequence(z, batch_first=True)
+        
+        # Project back to 128 dimensions
+        z = self.projection(z)
+        
+        # Output layer
+        logits = self.symbol(z)
+        log_probs = logits.transpose(0, 1).log_softmax(dim=2)
         
         return log_probs
+    
+    def freeze_ssl(self):
+        """Freeze SSL encoder and context."""
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+        for param in self.context.parameters():
+            param.requires_grad = False
+        self.encoder.eval()
+        self.context.eval()
+    
+    def unfreeze_ssl(self):
+        """Unfreeze SSL components."""
+        for param in self.encoder.parameters():
+            param.requires_grad = True
+        for param in self.context.parameters():
+            param.requires_grad = True
+    
+    def get_num_params(self):
+        """Get parameter counts."""
+        total = sum(p.numel() for p in self.parameters())
+        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        return {'total': total, 'trainable': trainable, 'frozen': total - trainable}

@@ -1,152 +1,264 @@
 from src.requirements import *
-        
+
 class AudioDataset(Dataset):
-    def __init__(self, metadata_path):
+    def __init__(self, metadata_path, cache_dir='data/cache_mmap', top_db=20):
         super().__init__()
         self.df = pd.read_csv(metadata_path, sep="\t")
-
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.top_db = top_db
+        
+        dataset_name = Path(metadata_path).stem
+        meta_file = self.cache_dir / f"{dataset_name}_meta.npz"
+        audio_file = self.cache_dir / f"{dataset_name}_audio.dat"
+        
+        if not meta_file.exists():
+            print("Preprocessing audio (first time only)...")
+            self._preprocess_all(audio_file, meta_file)
+        else:
+            print(f"Loading metadata from cache...")
+        
+        meta = np.load(meta_file, allow_pickle=True)
+        self.audio_shapes = meta['shapes']
+        self.audio_offsets = meta['offsets']
+        self.total_size = meta['total_size'].item()
+        
+        self.audio_mmap = np.memmap(audio_file, dtype='float32', mode='r', shape=(self.total_size,))
+        
+        print(f"  Cache ready! {len(self.df)} samples")
+        print(f"  Total audio size: {self.total_size * 4 / (1024**3):.2f} GB")
+    
+    def _preprocess_all(self, audio_file, meta_file):
+        import time
+        start = time.time()
+        
+        print("Processing audio files...")
+        
+        all_audio_data = []
+        all_shapes = []
+        
+        for idx in tqdm(range(len(self.df)), desc="Loading & preprocessing"):
+            path = self.df.iloc[idx]['path']
+            
+            waveform, sr = sf.read(path, always_2d=True)
+            waveform = np.array(waveform.T, dtype=np.float32)
+            
+            if waveform.shape[0] > 1:
+                waveform = waveform.mean(axis=0)
+            else:
+                waveform = waveform[0]
+            
+            # Trim
+            trimmed, _ = librosa.effects.trim(waveform, top_db=self.top_db)
+            
+            max_val = np.abs(trimmed).max()
+            if max_val > 0:
+                trimmed = trimmed / max_val
+            
+            all_audio_data.append(trimmed.astype(np.float32))
+            all_shapes.append(len(trimmed))
+        
+        total_size = sum(all_shapes)
+        print(f"Total samples: {total_size:,} ({total_size * 4 / (1024**3):.2f} GB)")
+        
+        offsets = np.zeros(len(all_shapes) + 1, dtype=np.int64)
+        np.cumsum(all_shapes, out=offsets[1:])
+        
+        print("Writing to memory-mapped file...")
+        mmap = np.memmap(audio_file, dtype='float32', mode='w+', shape=(total_size,))
+        
+        for i in tqdm(range(len(all_audio_data)), desc="Writing"):
+            start_pos = offsets[i]
+            end_pos = offsets[i + 1]
+            mmap[start_pos:end_pos] = all_audio_data[i]
+        
+        mmap.flush()
+        del mmap
+        
+        np.savez(meta_file,
+                 shapes=np.array(all_shapes, dtype=np.int64),
+                 offsets=offsets,
+                 total_size=np.array(total_size, dtype=np.int64))
+        
+        print(f"Done in {time.time() - start:.1f}s")
+    
     def __len__(self):
         return len(self.df)
-
+    
     def __getitem__(self, idx):
-        path = self.df.iloc[idx]['path']
-        waveform, sr = sf.read(path, always_2d=True)
-        waveform = torch.tensor(waveform.T, dtype=torch.float32)
+        start = self.audio_offsets[idx]
+        end = self.audio_offsets[idx + 1]
+        return torch.from_numpy(self.audio_mmap[start:end].copy())
 
-        if waveform.shape[0] > 1:
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
 
-        wave_np = waveform.squeeze(0).numpy()
-        trimmed, _ = librosa.effects.trim(wave_np, top_db=TOP_DB)
-        waveform = torch.tensor(trimmed, dtype=torch.float32).unsqueeze(0)
-
-        max_val = torch.max(torch.abs(waveform))
-        if max_val > 0:
-            waveform = waveform / max_val
-
-        return waveform.squeeze(0)
-
-class ABXDataset(Dataset):
-    def __init__(self, metadata_path, segment_len=32000): # e.g., 2 seconds at 16k
-        self.df = pd.read_csv(metadata_path, sep="\t")
-        self.segment_len = segment_len
-
-    def __len__(self):
-        return len(self.df)
-
-    def _get_segment(self, path):
-        waveform, _ = sf.read(path, always_2d=True)
-        waveform = torch.tensor(waveform.T, dtype=torch.float32).mean(dim=0)
-        
-        # Ensure it's long enough, else pad
-        if waveform.shape[0] < self.segment_len:
-            waveform = F.pad(waveform, (0, self.segment_len - waveform.shape[0]))
-        
-        # Random crop
-        start = torch.randint(0, waveform.shape[0] - self.segment_len + 1, (1,)).item()
-        return waveform[start : start + self.segment_len]
-
-    def __getitem__(self, idx):
-        path_a = self.df.iloc[idx]['path']
-        
-        # A and X are two different crops/augments of the same file
-        anchor = self._get_segment(path_a)
-        positive = self._get_segment(path_a) 
-        
-        # B is a random different file
-        random_idx = torch.randint(0, len(self.df), (1,)).item()
-        while random_idx == idx:
-            random_idx = torch.randint(0, len(self.df), (1,)).item()
-        
-        negative = self._get_segment(self.df.iloc[random_idx]['path'])
-        
-        return anchor, positive, negative
-
-class ASRDataset(Dataset):
-    def __init__(self, metadata_path, tokenizer):
+class ASRDataset(Dataset):    
+    def __init__(self, metadata_path, tokenizer, cache_dir='data/cache_mmap_asr', top_db=20):
         super().__init__()
         self.df = pd.read_csv(metadata_path, sep="\t")
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.tokenizer = tokenizer
-        self.audio_paths = self.df['path'].tolist()
-        self.transcripts = self.df['transcript'].tolist()
-
+        self.top_db = top_db
+        
+        dataset_name = Path(metadata_path).stem
+        meta_file = self.cache_dir / f"{dataset_name}_meta.npz"
+        audio_file = self.cache_dir / f"{dataset_name}_audio.dat"
+        
+        if not meta_file.exists():
+            print("Preprocessing audio (first time only)...")
+            self._preprocess_all(audio_file, meta_file)
+        else:
+            print(f"Loading metadata from cache...")
+        
+        meta = np.load(meta_file, allow_pickle=True)
+        self.audio_shapes = meta['shapes']
+        self.audio_offsets = meta['offsets']
+        self.total_size = meta['total_size'].item()
+        
+        self.audio_mmap = np.memmap(audio_file, dtype='float32', mode='r', shape=(self.total_size,))
+        
+        print(f"  Cache ready! {len(self.df)} samples")
+        print(f"  Total audio size: {self.total_size * 4 / (1024**3):.2f} GB")
+        
+        print("Encoding transcripts...")
         self.encode_transcripts = []
-        for t in self.transcripts:
+        for t in tqdm(self.df['transcript'].tolist(), desc="Encoding"):
             encoded = tokenizer.encode(t)
             encoded = [i if i >= 0 else 0 for i in encoded]
             self.encode_transcripts.append(torch.tensor(encoded, dtype=torch.long))
-
+    
+    def _preprocess_all(self, audio_file, meta_file):
+        import time
+        start = time.time()
+        
+        print("Processing audio files...")
+        
+        all_audio_data = []
+        all_shapes = []
+        
+        for idx in tqdm(range(len(self.df)), desc="Loading & preprocessing"):
+            path = self.df.iloc[idx]['path']
+            
+            waveform, sr = sf.read(path, always_2d=True)
+            waveform = np.array(waveform.T, dtype=np.float32)
+            
+            if waveform.shape[0] > 1:
+                waveform = waveform.mean(axis=0)
+            else:
+                waveform = waveform[0]
+            
+            trimmed, _ = librosa.effects.trim(waveform, top_db=self.top_db)
+            
+            max_val = np.abs(trimmed).max()
+            if max_val > 1:
+                trimmed = trimmed / max_val
+            
+            all_audio_data.append(trimmed.astype(np.float32))
+            all_shapes.append(len(trimmed))
+        
+        total_size = sum(all_shapes)
+        print(f"Total samples: {total_size:,} ({total_size * 4 / (1024**3):.2f} GB)")
+        
+        offsets = np.zeros(len(all_shapes) + 1, dtype=np.int64)
+        np.cumsum(all_shapes, out=offsets[1:])
+        
+        print("Writing to memory-mapped file...")
+        mmap = np.memmap(audio_file, dtype='float32', mode='w+', shape=(total_size,))
+        
+        for i in tqdm(range(len(all_audio_data)), desc="Writing"):
+            start_pos = offsets[i]
+            end_pos = offsets[i + 1]
+            mmap[start_pos:end_pos] = all_audio_data[i]
+        
+        mmap.flush()
+        del mmap
+        
+        np.savez(meta_file,
+                 shapes=np.array(all_shapes, dtype=np.int64),
+                 offsets=offsets,
+                 total_size=np.array(total_size, dtype=np.int64))
+        
+        print(f"Done in {time.time() - start:.1f}s")
+    
     def __len__(self):
         return len(self.df)
-
+    
     def __getitem__(self, idx):
-        row = self.df.iloc[idx]
-        waveform, sr = sf.read(row['path'], always_2d=True)
-        waveform = torch.tensor(waveform.T, dtype=torch.float32)
-
-        if waveform.shape[0] > 1:
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
-
-        wave_np = waveform.squeeze(0).numpy()
-        trimmed, _ = librosa.effects.trim(wave_np, top_db=TOP_DB)
-        waveform = torch.tensor(trimmed, dtype=torch.float32).unsqueeze(0)
-
-        max_val = torch.max(torch.abs(waveform))
-        if max_val > 1:
-            waveform = waveform / max_val
-        
+        start = self.audio_offsets[idx]
+        end = self.audio_offsets[idx + 1]
+        waveform = torch.from_numpy(self.audio_mmap[start:end].copy())
         target = self.encode_transcripts[idx]
-        
-        return waveform.squeeze(0), target
+        return waveform, target
+
 
 def collate_padding(batch):
-    padded_batch = rnn_utils.pad_sequence(batch, batch_first=True, padding_value=0)
+    if len(batch) == 0:
+        return torch.empty(0, 1, 0)
+    
+    batch = [torch.as_tensor(b) if not isinstance(b, torch.Tensor) else b for b in batch]
+    batch = [b.flatten() for b in batch]
+    padded_batch = rnn_utils.pad_sequence(batch, batch_first=True, padding_value=0.0)
     padded_batch = padded_batch.unsqueeze(1)
+    
     return padded_batch
 
 def collate_padding_asr(batch):
     waveforms, targets = zip(*batch)
+    waveforms = [w.flatten() if isinstance(w, torch.Tensor) else torch.as_tensor(w).flatten() 
+                 for w in waveforms]
+    
     raw_waveform_len = torch.tensor([len(w) for w in waveforms], dtype=torch.long)
     
-    waveforms = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0)
-    waveforms = waveforms.unsqueeze(1)
-
-    # targets = rnn_utils.pad_sequence(targets, batch_first=True, padding_value=0)
-    target_len = torch.tensor([len(target) for target in targets], dtype=torch.long)
-
-    DOWNSAMPLING_FACTOR = 320 
-    input_len = torch.div(raw_waveform_len, DOWNSAMPLING_FACTOR, rounding_mode='floor')
+    waveforms_padded = rnn_utils.pad_sequence(waveforms, batch_first=True, padding_value=0.0)
+    waveforms_padded = waveforms_padded.unsqueeze(1)  # (batch, 1, max_len)
     
-    input_len[input_len == 0] = 1
+    DOWNSAMPLING_FACTOR = 320
+    input_lengths = torch.clamp(
+        torch.div(raw_waveform_len, DOWNSAMPLING_FACTOR, rounding_mode='floor'),
+        min=1
+    )
+    target_lengths = torch.tensor([len(t) for t in targets], dtype=torch.long)
+    
+    return waveforms_padded, targets, input_lengths, target_lengths
 
-    return waveforms, targets, input_len, target_len
+    
+
+def is_valid_char(ch):
+    code = ord(ch)
+
+    # 1. Devanagari block (U+0900 to U+097F)
+    if 0x0900 <= code <= 0x097F:
+        return True
+
+    # 2. Standard Latin Digits (0-9) 
+    if '0' <= ch <= '9':
+        return True
+
+    # 3. Basic Punctuation & Whitespace
+    if ch in " \n\t.,?!-()\"'।॥":
+        return True
+
+    return False
+
+def normalize_text(text):
+    out = []
+    for ch in text:
+        # 1. Convert any weird numeral to standard '0-9'
+        char_to_check = DIGIT_MAP.get(ch, ch)
+        
+        # 2. Only keep it if it's in our allowed list
+        if is_valid_char(char_to_check):
+            out.append(char_to_check)
+            
+    return "".join(out)
 
 def load_text(text_path):
-    all_text = ""
+    all_chunks = []
     for file in tqdm(glob.glob(text_path + "/**/*.txt", recursive=True)):
         with open(file, "r", encoding="utf-8") as f:
-            all_text += f.read() + "\n"
-    return all_text
-
-@torch.no_grad()
-def run_abx_val(model, abx_loader, device):
-    model.eval()
-    correct = 0
-    total = 0
+            text = f.read()
+            text = normalize_text(text)
+            filtered_text = "".join([ch for ch in text if is_valid_char(ch)])
+            all_chunks.append(filtered_text)
     
-    for a, p, n in tqdm(abx_loader):
-        a, p, n = a.to(device).unsqueeze(1), p.to(device).unsqueeze(1), n.to(device).unsqueeze(1)
-        
-        feat_a = model.extract_features(a).mean(dim=1)
-        feat_p = model.extract_features(p).mean(dim=1)
-        feat_n = model.extract_features(n).mean(dim=1)
-        
-        sim_pos = F.cosine_similarity(feat_a, feat_p)
-        sim_neg = F.cosine_similarity(feat_a, feat_n)
-        
-        correct += (sim_pos > sim_neg).sum().item()
-        total += a.size(0)
-    
-    accuracy = correct / total
-    print(f"ABX Discrimination Accuracy: {accuracy:.2%}")
-    return accuracy
+    return "\n".join(all_chunks)

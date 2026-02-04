@@ -1,86 +1,90 @@
 from src.requirements import *
 
-class FeatureEncoder(nn.Module):
+class FeatureEncoder(nn.Module):    
     def __init__(self, in_channels=1, hidden_dim=128):
         super().__init__()
-        self.encoder = nn.Sequential(
-            nn.Conv1d(in_channels, hidden_dim, kernel_size=3, stride=5, padding=1),
-            nn.BatchNorm1d(hidden_dim),
-            nn.GELU(),
         
-            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=4, padding=1),
-            nn.BatchNorm1d(hidden_dim),
-            nn.GELU(),
+        self.conv1 = nn.Conv1d(in_channels, hidden_dim, kernel_size=10, stride=5, padding=3)
+        self.gn1 = nn.GroupNorm(num_groups=8, num_channels=hidden_dim)
+        self.act1 = nn.GELU()
         
-            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=4, padding=1),
-            nn.BatchNorm1d(hidden_dim),
-            nn.GELU(),
+        self.conv2 = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=4, padding=1)
+        self.act2 = nn.GELU()
         
-            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=4, padding=1),
-            nn.BatchNorm1d(hidden_dim),
-            nn.GELU()            
-        )
+        self.conv3 = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=4, padding=1)
+        self.act3 = nn.GELU()
+        
+        self.conv4 = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=4, padding=1)
+        self.gn4 = nn.GroupNorm(num_groups=8, num_channels=hidden_dim)
+        self.act4 = nn.GELU()
         
     def forward(self, x):
-        return self.encoder(x)
+        x = self.act1(self.gn1(self.conv1(x)))
+        x = self.act2(self.conv2(x))
+        x = self.act3(self.conv3(x))
+        x = self.act4(self.gn4(self.conv4(x)))
+        return x
 
-class ContextModule(nn.Module):
+
+class ContextModule(nn.Module):    
     def __init__(self, input_dim, hidden_dim, num_layers=3, dropout=0.1):
         super().__init__()
         self.layers = nn.ModuleList()
-        self.norms = nn.ModuleList()
         
         for i in range(num_layers):
             curr_input = input_dim if i == 0 else hidden_dim
             self.layers.append(
                 nn.GRU(curr_input, hidden_dim, batch_first=True)
             )
-            self.norms.append(nn.LayerNorm(hidden_dim))
-            
+        
+        self.norm = nn.LayerNorm(hidden_dim)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        for gru, norm in zip(self.layers, self.norms):
+        for i, gru in enumerate(self.layers):
             residual = x
             x, _ = gru(x)
-            x = norm(x)
             x = self.dropout(x)
             
             if residual.shape == x.shape:
                 x = x + residual
+        
+        x = self.norm(x)
         return x
 
-class Predictor(nn.Module):
+
+class Predictor(nn.Module):    
     def __init__(self, hidden_dim, proj_dim):
         super().__init__()
         self.project = nn.Sequential(
-            nn.Linear(proj_dim, proj_dim),
-            nn.LayerNorm(proj_dim),
-            nn.ReLU(),
-            nn.Linear(proj_dim, proj_dim),
-            nn.LayerNorm(proj_dim)
+            nn.Linear(proj_dim, proj_dim * 2),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(proj_dim * 2, proj_dim),
         )
 
     def forward(self, x):
         return self.project(x)
 
+
 class SSLModel(nn.Module):
-    def __init__(self, feat_dim=128, proj_dim=128, m=0.99):
+    def __init__(self, feat_dim=128, proj_dim=256, m=0.99):
         super().__init__()
 
-        # online networks
+        # Online networks
         self.encoder = FeatureEncoder()
         self.context = ContextModule(feat_dim, feat_dim)
+        
         self.projector = nn.Sequential(
             nn.Linear(feat_dim, proj_dim),
-            nn.LayerNorm(proj_dim),
-            nn.ReLU(),
+            nn.GELU(),
+            nn.Dropout(0.1),
             nn.Linear(proj_dim, proj_dim),
             nn.LayerNorm(proj_dim)
         )
+        
         self.predictor = Predictor(proj_dim, proj_dim)
 
-        # momentum networks
         self.momentum = m
         self.encoder_m = copy.deepcopy(self.encoder)
         self.context_m = copy.deepcopy(self.context)
@@ -132,8 +136,11 @@ class SSLModel(nn.Module):
         p1_masked = p1[mask_sub]
         h2_masked = h2[mask_sub]
         
-        loss = byol_loss(p1_masked, h2_masked) + 1.0 * variance_loss(c1_sub)
+        loss = byol_loss(p1_masked, h2_masked)
+        loss = loss + 0.001 * variance_loss(c1_sub)
+        
         return loss
+
 
 def byol_loss(p, z):
     p = F.normalize(p, dim=-1)

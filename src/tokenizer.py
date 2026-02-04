@@ -1,122 +1,87 @@
 from src.requirements import *
 
 class Tokenizer:
-    def __init__(self, corpus_path, add_blank=True, vocab=None):
+    def __init__(self, vocab=None):
+        self.blank_token = "<blank>"
+        self.blank_id = 0
+        
         if vocab is not None:
-            self.vocab = vocab
-            self.token_to_id = {t: i for i, t in enumerate(self.vocab)}
-            self.id_to_token = {i: t for t, i in self.token_to_id.items()}
-            print(f"Final Vocabulary Size after filtering: {len(self.vocab)}")
-            print(f"Blank ID: {self.token_to_id.get('<blank>', 'Not Found')}")
+            self.token_to_id = vocab["tokens"]
+            self.id_to_token = {int(k): v for k, v in vocab["ids"].items()}
+            self.vocab_size = vocab["size"]
+
             return
+
+        self.token_to_id = {}
+        self.id_to_token = {}
+
+    # Normalization
+    def normalize(self, text: str) -> str:
+        return unicodedata.normalize("NFD", text)
+
+    def denormalize(self, text: str) -> str:
+        return unicodedata.normalize("NFC", text)
+
+    # Vocab
+    def build_vocab(self, texts):
+        counter = Counter()
+
+        for text in texts:
+            text = self.normalize(text)
+            for ch in text:
+                counter[ch] += 1
+
+        # these seem to be missing in corpus so just hardcoding these
+        required_chars = (
+            "०१२३४५६७८९" 
+            ".,?!:;()\"'- " +
+            "।॥"
+        )
         
-        with open(corpus_path, 'r', encoding='utf-8') as f:
-            lines = [unicodedata.normalize('NFKC', l.strip()) for l in f]
+        # <blank> : id[0]
+        self.token_to_id = {self.blank_token: self.blank_id}
+        self.id_to_token = {self.blank_id: self.blank_token}
 
-        tokens = []
-        for line in lines:
-            tokens.extend(self.tokenize(line))
-
-        vowels = [
-            'अ', 'आ', 'इ', 'ई', 'उ', 'ऊ', 'ऋ', 
-            'ए', 'ऐ', 'ओ', 'औ', 'अं', 'अः',
-        ]
-        special_chars = [
-            '०', '१', '२', '३', '४', '५', '६', '७', '८', '९', '।', ',', '?', '!', '-', '(', ')', '"', "'", ' '
-        ]
-        consonants = [
-            'क', 'ख', 'ग', 'घ', 'ङ',
-            'च', 'छ', 'ज', 'झ', 'ञ',
-            'ट', 'ठ', 'ड', 'ढ', 'ण',
-            'त', 'थ', 'द', 'ध', 'न',
-            'प', 'फ', 'ब', 'भ', 'म',
-            'य', 'र', 'ल', 'व',
-            'श', 'ष', 'स', 'ह',
-            'क्ष', 'त्र', 'ज्ञ'
-        ]
-        matras = [
-            "", "ा", "ि", "ी", "ु", "ू", "े",
-            "ै", "ो", "ौ", "ं", "ः", "ँ", "्"
-        ]
-        # half_letters = []
-
-        # CHARACTER_WHITELIST = set(vowels + self._gen_vocab(consonants, matras) + special_chars)
-        CHARACTER_WHITELIST = set(vowels + consonants + matras + special_chars)
-        
-        filtered_tokens = [token for token in tokens if token in CHARACTER_WHITELIST]
-        counter = Counter(filtered_tokens)
-        self.vocab = sorted(counter.keys())
-
-        if add_blank:
-            self.vocab = ['<blank>'] + self.vocab
-
-        self.token_to_id = {t: i for i, t in enumerate(self.vocab)}
-        self.id_to_token = {i: t for t, i in self.token_to_id.items()}
-
-        print(f"Final Vocabulary Size after filtering: {len(self.vocab)}")
-        print(f"Blank ID: {self.token_to_id.get('<blank>', 'Not Found')}")
-
-    def _gen_vocab(self, consonants, matras):
-        vocabs = []
-        for c in consonants:
-            for m in matras:
-                vocabs.append(c + m)
-        return vocabs
-
-    def _split_grapheme(self, token):
-        sp_keyword = '्'
-        if sp_keyword not in token:
-            return [token]
-        parts = []
-        temp = ''
-    
-        for char in token:
-            temp += char
-            if char in sp_keyword:
-                parts.append(temp)
-                temp = ''
-    
-        if temp:
-            parts.append(temp)
-    
-        return parts
-
-    def tokenize(self, text):
-        text = unicodedata.normalize('NFKC', text)
-        tokens = list(text)
-        return tokens
-        
-    def _tokenize(self, text):
-        text = unicodedata.normalize('NFKC', text)
-        CLEANUP_PATTERN = re.compile(r'[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\u00ad\u0000-\u001f]')
-        cleaned_text = CLEANUP_PATTERN.sub('', text)
-        parts = cleaned_text.split(' ')
-        tokens = []
-        space_token = ' '
-        
-        for i, part in enumerate(parts):
-            if part:
-                graphemes = regex.findall(r'\X', part)
-                for g in graphemes:
-                    # tokens.extend(self._split_grapheme(g))
-                    tokens.append(g)
-        
-            if i < len(parts) - 1:
-                tokens.append(space_token)
+        next_id = 1
+        for ch in required_chars:
+            if ch not in self.token_to_id:
+                self.token_to_id[ch] = next_id
+                self.id_to_token[next_id] = ch
+                next_id += 1
                 
-        return tokens
+        for ch, count in counter.most_common():
+            if ch not in self.token_to_id:
+                self.token_to_id[ch] = next_id
+                self.id_to_token[next_id] = ch
+                next_id += 1
 
-    def encode(self, text):
-        tokens = self.tokenize(text)
-        output = [self.token_to_id[t] for t in tokens if t in self.token_to_id]
-        return output
+        self.vocab_size = next_id
+
+    # Encoding / Decoding
+    def encode(self, text: str):
+        text = self.normalize(text)
+        ids = []
+
+        for ch in text:
+            if ch not in self.token_to_id:
+                raise ValueError(f"Unknown character: {repr(ch)}")
+            ids.append(self.token_to_id[ch])
+
+        return ids
 
     def decode(self, ids):
-        output = ''.join([self.id_to_token[i] for i in ids])
-        return output
+        chars = []
+
+        for i in ids:
+            if i == self.blank_id:
+                continue
+            chars.append(self.id_to_token[i])
+
+        text = "".join(chars)
+        return self.denormalize(text)
 
     def save(self, path):
-        data = {"vocab": self.vocab}
+        data = {"tokens" : self.token_to_id, "ids" : self.id_to_token, "size" : self.vocab_size}
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -124,4 +89,14 @@ class Tokenizer:
     def load(path):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return Tokenizer(corpus_path=None, vocab=data["vocab"])
+        return Tokenizer(vocab=data)
+
+    def get_vocab(self):
+        vocab = []
+        for k, v in self.token_to_id.items():
+            vocab.append(k)
+
+        return vocab
+
+    def __len__(self):
+        return self.vocab_size
