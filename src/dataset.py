@@ -258,9 +258,10 @@ def collate_fn_asr(batch: List[Dict], tokenizer) -> Dict:
     )
 
     return {
-        'audio':          padded_audio,
+        'waveforms':      padded_audio,
         'audio_lengths':  audio_lengths,
         'targets':        padded_targets,
         'target_lengths': target_lengths,
         'filenames':      names,
+        'transcripts':    transcripts,
     }

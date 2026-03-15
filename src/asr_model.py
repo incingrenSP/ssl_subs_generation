@@ -1,249 +1,179 @@
-from src.requirements import *
-from src.tokenizer import *
-from src.ssl_large import *
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Optional, Tuple
 
-
-class MultiScaleFeatureExtractor(nn.Module):
-    def __init__(self, input_dim, output_dim):
+class WhiteningNorm(nn.Module):
+    def __init__(self, dim, eps=1e-5, momentum=0.01):
         super().__init__()
-        
-        # Different temporal scales
-        self.local = nn.Conv1d(input_dim, output_dim // 4, kernel_size=3, padding=1)
-        self.medium = nn.Conv1d(input_dim, output_dim // 4, kernel_size=7, padding=3)
-        
-        # Global context
-        self.global_pool = nn.AdaptiveAvgPool1d(1)
-        self.global_fc = nn.Linear(input_dim, output_dim // 4)
-        
-        # Learnable combination
-        self.combine = nn.Sequential(
-            nn.Linear(output_dim // 4 * 3, output_dim),
-            nn.LayerNorm(output_dim),
-            nn.GELU(),
-            nn.Dropout(0.1)
-        )
-        
-        # Residual projection
-        self.residual_proj = nn.Linear(input_dim, output_dim) if input_dim != output_dim else nn.Identity()
-        
+        self.eps = eps
+        self.momentum = momentum
+        self.register_buffer("running_mean", torch.zeros(dim))
+        self.register_buffer("running_cov", torch.eye(dim))
+        self.weight = nn.Parameter(torch.ones(dim))
+        self.bias   = nn.Parameter(torch.zeros(dim))
+
     def forward(self, x):
-        batch, seq_len, dim = x.shape
-        
-        # Transpose for conv1d: (batch, dim, seq_len)
-        x_t = x.transpose(1, 2)
-        
-        # Multi-scale features
-        local_feat = self.local(x_t).transpose(1, 2)  # (batch, seq_len, output_dim//4)
-        medium_feat = self.medium(x_t).transpose(1, 2)  # (batch, seq_len, output_dim//4)
-        
-        # Global context
-        global_feat = self.global_pool(x_t).squeeze(-1)  # (batch, input_dim)
-        global_feat = self.global_fc(global_feat)  # (batch, output_dim//4)
-        global_feat = global_feat.unsqueeze(1).expand(-1, seq_len, -1)  # (batch, seq_len, output_dim//4)
-        
-        # Concatenate all scales
-        combined = torch.cat([local_feat, medium_feat, global_feat], dim=-1)
-        
-        # Mix and project
-        output = self.combine(combined)
-        
-        # Residual connection
-        output = output + self.residual_proj(x)
-        
-        return output
-
-
-class ASRModel(nn.Module):
-    def __init__(self, ssl_model, vocab_size, hidden_dim=256, num_layers=4, dropout=0.1):
-        super().__init__()
-        
-        # Get SSL feature dimension (flexible for different model sizes)
-        self.ssl_feat_dim = self._get_ssl_feat_dim(ssl_model)
-        
-        # SSL components (will be frozen)
-        self.encoder = ssl_model.encoder
-        self.context = ssl_model.context
-        
-        # Multi-scale feature extraction (adapts to SSL dimension)
-        self.multiscale = MultiScaleFeatureExtractor(
-            input_dim=self.ssl_feat_dim,
-            output_dim=self.ssl_feat_dim
-        )
-        
-        # Diversification layer
-        self.diversify = nn.Sequential(
-            nn.Linear(self.ssl_feat_dim, self.ssl_feat_dim * 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(self.ssl_feat_dim * 2, self.ssl_feat_dim),
-            nn.Dropout(dropout)
-        )
-        
-        # Bi-LSTM layers
-        self.lstm = nn.LSTM(
-            input_size=self.ssl_feat_dim,
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            batch_first=True,
-            bidirectional=True,
-            dropout=dropout if num_layers > 1 else 0
-        )
-        
-        # Project bi-directional output
-        self.projection = nn.Linear(hidden_dim * 2, self.ssl_feat_dim)
-        
-        # Output layer
-        self.symbol = nn.Linear(self.ssl_feat_dim, vocab_size)
-        
-        self._init_weights()
-    
-    def _get_ssl_feat_dim(self, ssl_model):
-        # Try to get from context module
-        if hasattr(ssl_model.context, 'input_proj'):
-            return ssl_model.context.input_proj.out_features
-        elif hasattr(ssl_model.context, 'norm'):
-            return ssl_model.context.norm.normalized_shape[0]
+        # x: (B, T, dim)
+        if self.training:
+            B, T, D = x.shape
+            x_flat = x.reshape(-1, D)
+            mean = x_flat.mean(0)
+            centered = x_flat - mean
+            cov = (centered.T @ centered) / (x_flat.shape[0] - 1)
+            self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
+            self.running_cov  = (1 - self.momentum) * self.running_cov  + self.momentum * cov
         else:
-            # Fallback: assume 256
-            return 256
-    
-    def _init_weights(self):
-        for name, param in self.lstm.named_parameters():
-            if 'weight_ih' in name:
-                nn.init.xavier_uniform_(param.data)
-            elif 'weight_hh' in name:
-                nn.init.orthogonal_(param.data)
-            elif 'bias' in name:
-                param.data.fill_(0)
+            mean = self.running_mean
+            cov  = self.running_cov
+
+        # Whiten
+        U, S, _ = torch.linalg.svd(cov + self.eps * torch.eye(cov.shape[0], device=cov.device))
+        W = U @ torch.diag(1.0 / S.sqrt()) @ U.T
+        x_centered = x - mean
+        x_white = x_centered @ W.T
+        return x_white * self.weight + self.bias
+
+class NepaliASR(nn.Module):
+    def __init__(
+        self,
+        ssl_model,
+        vocab_size: int,
+        freeze_encoder: bool = True,
+    ):
+        super().__init__()
+
+        # Pull encoder components from SSL model
+        self.encoder  = ssl_model.cnn      # CNNEncoder
+        self.context  = ssl_model.context  # TransformerEncoder
+        hidden_dim    = ssl_model.cfg.hidden_dim  # 256
         
-        nn.init.xavier_uniform_(self.projection.weight)
-        nn.init.zeros_(self.projection.bias)
-        nn.init.xavier_uniform_(self.symbol.weight)
-        nn.init.zeros_(self.symbol.bias)
-    
-    def forward(self, x, input_lengths=None):
-        # Extract SSL features (frozen)
-        with torch.no_grad():
-            z = self.encoder(x).transpose(1, 2)  # (batch, time, ssl_feat_dim)
-            z = self.context(z)
+        self.pre_head_norm = nn.LayerNorm(hidden_dim)
+        # self.pre_head_norm = WhiteningNorm(hidden_dim)
+
+        # CTC projection head
+        self.ctc_head = nn.Linear(hidden_dim, vocab_size)
+        nn.init.normal_(self.ctc_head.weight, mean=0, std=0.02)
+        nn.init.zeros_(self.ctc_head.bias)
+
+        self.vocab_size = vocab_size
+
+        if freeze_encoder:
+            self.freeze_encoder()
+
+    # Freeze / unfreeze helpers
+    def freeze_encoder(self):
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+        for p in self.context.parameters():
+            p.requires_grad = False
+
+    def unfreeze_transformer(self):
+        for p in self.context.parameters():
+            p.requires_grad = True
+
+    def unfreeze_cnn(self):
+        for p in self.encoder.parameters():
+            p.requires_grad = True
+
+    def unfreeze_all(self):
+        self.unfreeze_transformer()
+        self.unfreeze_cnn()
+
+    # Forward
+    def forward(
+        self,
+        waveform: torch.Tensor,         # (B, T_samples)
+        lengths:  Optional[torch.Tensor] = None,  # (B,) sample lengths
+        spec_aug = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        B, T_wav = waveform.shape
+        device = waveform.device
+
+        if lengths is None:
+            lengths = torch.full((B,), T_wav, device=device, dtype=torch.long)
+
+        # CNN feature
+        features = self.encoder(waveform)               # (B, T, 256)
+        T = features.size(1)
         
-        # Multi-scale feature extraction
-        z = self.multiscale(z)
-        z = z + self.diversify(z)  # Residual connection
-        
-        # Pack sequences if lengths provided (for efficiency)
-        if input_lengths is not None:
-            z = nn.utils.rnn.pack_padded_sequence(
-                z, 
-                input_lengths.cpu(), 
-                batch_first=True, 
-                enforce_sorted=False
-            )
-        
-        # Bi-LSTM
-        z, _ = self.lstm(z)
-        
-        # Unpack sequences
-        if input_lengths is not None:
-            z, _ = nn.utils.rnn.pad_packed_sequence(z, batch_first=True)
-        
-        # Project back to SSL dimension
-        z = self.projection(z)
-        
-        # Output layer
-        logits = self.symbol(z)
-        log_probs = logits.transpose(0, 1).log_softmax(dim=2)
-        
-        return log_probs
-    
-    def freeze_ssl(self):
-        for param in self.encoder.parameters():
-            param.requires_grad = False
-        for param in self.context.parameters():
-            param.requires_grad = False
-        self.encoder.eval()
-        self.context.eval()
-        print("✓ SSL components frozen")
-    
-    def unfreeze_ssl(self, lr_scale=0.1):
-        for param in self.encoder.parameters():
-            param.requires_grad = True
-        for param in self.context.parameters():
-            param.requires_grad = True
-        self.encoder.train()
-        self.context.train()
-        print(f"✓ SSL components unfrozen (recommended LR scale: {lr_scale}x)")
-    
-    def get_num_params(self):
-        total = sum(p.numel() for p in self.parameters())
-        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        frozen = total - trainable
-        
-        # Breakdown by component
-        ssl_params = sum(p.numel() for p in self.encoder.parameters()) + \
-                    sum(p.numel() for p in self.context.parameters())
-        asr_params = total - ssl_params
-        
-        return {
-            'total': total,
-            'trainable': trainable,
-            'frozen': frozen,
-            'ssl': ssl_params,
-            'asr': asr_params
-        }
-    
-    def print_model_info(self):
-        params = self.get_num_params()
-        print(f"\n{'='*60}")
-        print("ASR Model Information")
-        print(f"{'='*60}")
-        print(f"SSL feature dimension: {self.ssl_feat_dim}")
-        print(f"Vocabulary size: {self.symbol.out_features}")
-        print(f"\nParameters:")
-        print(f"  Total: {params['total']:,}")
-        print(f"  Trainable: {params['trainable']:,}")
-        print(f"  Frozen: {params['frozen']:,}")
-        print(f"  SSL: {params['ssl']:,}")
-        print(f"  ASR head: {params['asr']:,}")
-        print(f"{'='*60}\n")
+        # Check Spectral Augmentation
+        if spec_aug is not None:
+            features = spec_aug(features)
+
+        # Compute valid frame lengths from sample lengths
+        frame_lengths = (
+            lengths.float() / T_wav * T
+        ).long().clamp(max=T)                           # (B,)
+
+        # Padding mask for transformer (True = padding)
+        pad_mask = (
+            torch.arange(T, device=device).unsqueeze(0)
+            >= frame_lengths.unsqueeze(1)
+        )                                               # (B, T)
+
+        # Transformer context
+        context = self.context(features, padding_mask=pad_mask)  # (B, T, 256)
+        context = self.pre_head_norm(context)
+
+        # CTC head
+        logits    = self.ctc_head(context)              # (B, T, vocab_size)
+        log_probs = F.log_softmax(logits, dim=-1)       # (B, T, vocab_size)
+
+        return log_probs, frame_lengths
+
+    # Representation geometry
+
+    @torch.no_grad()
+    def get_representations(
+        self,
+        waveform: torch.Tensor,
+        lengths:  Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        B, T_wav = waveform.shape
+        device = waveform.device
+
+        if lengths is None:
+            lengths = torch.full((B,), T_wav, device=device, dtype=torch.long)
+
+        features = self.encoder(waveform)
+        T = features.size(1)
+        frame_lengths = (lengths.float() / T_wav * T).long().clamp(max=T)
+        pad_mask = (
+            torch.arange(T, device=device).unsqueeze(0)
+            >= frame_lengths.unsqueeze(1)
+        )
+        return self.context(features, padding_mask=pad_mask)
 
 
-def create_asr_model(ssl_checkpoint_path, tokenizer, device='cuda', 
-                     hidden_dim=256, num_layers=4, dropout=0.1):
-    
-    print(f"Loading SSL model from {ssl_checkpoint_path}...")
-    
-    # Create SSL model (adjust size based on your training)
-    ssl_model = LargeSSLModel(
-        feat_dim=256,
-        proj_dim=256,
-        m=0.996
-    )
-    
-    # Load checkpoint
+def load_asr_model(
+    ssl_checkpoint_path: str,
+    vocab_size: int,
+    device: str = "cuda",
+    freeze_encoder: bool = True,
+) -> NepaliASR:
+    from src.ssl_model import NepaliSSL, NepaliSSLConfig
+
     checkpoint = torch.load(ssl_checkpoint_path, map_location=device)
-    ssl_model.load_state_dict(checkpoint['model_state_dict'])
-    ssl_model.to(device)
+
+    cfg_data = checkpoint.get("config", None)
+    if isinstance(cfg_data, dict):
+        cfg = NepaliSSLConfig(**cfg_data)
+    elif cfg_data is None:
+        cfg = NepaliSSLConfig()
+    else:
+        cfg = cfg_data
+    ssl_model = NepaliSSL(cfg)
+    ssl_model.load_state_dict(checkpoint["model"])
     ssl_model.eval()
-    
-    num_updates = checkpoint.get('num_updates', 'unknown')
-    print(f"✓ SSL model loaded (trained for {num_updates} updates)")
-    
-    # Create ASR model
-    vocab_size = len(tokenizer)
-    asr_model = ASRModel(
-        ssl_model=ssl_model,
-        vocab_size=vocab_size,
-        hidden_dim=hidden_dim,
-        num_layers=num_layers,
-        dropout=dropout
-    )
-    
-    # Freeze SSL by default
-    asr_model.freeze_ssl()
-    asr_model.to(device)
-    
-    # Print info
-    asr_model.print_model_info()
-    
+
+    asr_model = NepaliASR(ssl_model, vocab_size=vocab_size, freeze_encoder=freeze_encoder)
+    asr_model = asr_model.to(device)
+
+    total     = sum(p.numel() for p in asr_model.parameters())
+    trainable = sum(p.numel() for p in asr_model.parameters() if p.requires_grad)
+    print(f"Total params:     {total:,}")
+    print(f"Trainable params: {trainable:,}  ({100*trainable/total:.1f}%)")
+
     return asr_model
