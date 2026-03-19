@@ -1,0 +1,81 @@
+{
+  "_notes": {
+    "source": "Reconstructed from training logs across conversation history",
+    "tokenizer_switch": "Runs 1-3 used unicode tokenizer (99 tokens). Run 4 used grapheme tokenizer (723 tokens)",
+    "data_split_fix": "Runs 1-3 had train/val distribution mismatch. Run 4 used stratified 95/5 split from train data only",
+    "best_checkpoint": "Run 4, step 58000: CER=21.83%, WER=67.28%",
+    "hardware_note": "Run 4 resumed at step 40000 after PSU failure, continued on RTX 4080",
+    "optimizer_note": "Optimizer state not restored on resumes (commented-out line) — Adam momentum reset each time",
+    "lr_schedule": "Flat with warmup 2000 steps, single decay factor 0.3 at step 30000",
+    "base_lrs_run4": {
+      "pre_head_norm": "1e-3 -> 3e-4 after step 30k",
+      "ctc_head": "1e-3 -> 3e-4 after step 30k",
+      "context_transformer": "1e-4 -> 3e-5 after step 30k",
+      "cnn_encoder": "1e-5 -> 3e-6 after step 30k"
+    }
+  },
+
+  "run1_unicode_norm_cascade": {
+    "description": "Unicode tokenizer (99 tokens). Norm intervention triggered repeatedly, cascading encoder LR to 3.125e-06. Data split mismatch present.",
+    "tokenizer": "unicode",
+    "vocab_size": 99,
+    "honest_split": false,
+    "failure_mode": "norm_intervention_cascade + data_split_mismatch",
+    "steps":          [0,    1000, 3000, 5000, 7000, 9000, 12000, 15000, 19332],
+    "cer":            [100,  82,   64.8, 60.1, 54.0, 51.8, 48.3,  45.2,  44.2],
+    "wer":            [100,  100,  100,  99.7, 99.0, 97.9, 97.1,  95.7,  95.8],
+    "val_loss":       [null, null, null, 2.17, null, null, 1.88,  1.79,  1.79]
+  },
+
+  "run2_cosine_decay_collapse": {
+    "description": "Resumed from step 10k with cosine decay schedule. Encoder LR decayed to near-zero before convergence, space probability collapsed to 1.3% by step 40k.",
+    "tokenizer": "grapheme",
+    "vocab_size": 723,
+    "honest_split": false,
+    "failure_mode": "cosine_decay_killed_encoder + data_split_mismatch",
+    "steps":     [0,    10000, 20000, 30000, 40000],
+    "cer":       [100,  57,    55,    54,    53.5],
+    "wer":       [100,  100,   100,   100,   100],
+    "val_loss":  [null, null,  null,  null,  null],
+    "space_frac":[null, null,  null,  null,  0.013]
+  },
+
+  "run3_flat_lr_plateau": {
+    "description": "Resumed from step 10k with flat LR. CER stuck at 57-58%, no improvement. Data split mismatch root cause.",
+    "tokenizer": "grapheme",
+    "vocab_size": 723,
+    "honest_split": false,
+    "failure_mode": "data_split_mismatch",
+    "steps":     [0,    10000, 15000, 19332],
+    "cer":       [100,  58,    57.5,  57.0],
+    "wer":       [100,  100,   100,   100],
+    "val_loss":  [null, null,  null,  null]
+  },
+
+  "run4_final": {
+    "description": "Fresh start. Grapheme tokenizer (723 tokens). Stratified 95/5 split from train data. Flat LR + single decay at step 30k. No norm intervention. CNN unfreeze at step 5000. Loss: CTC - 0.10*entropy.",
+    "tokenizer": "grapheme",
+    "vocab_size": 723,
+    "honest_split": true,
+    "failure_mode": null,
+    "hardware_resume_at": 40000,
+    "steps":       [14000, 20000, 21000, 40000, 42000, 43000, 44000, 45000, 46000, 47000, 48000, 49000, 50000, 51000, 52000, 53000, 54000, 55000, 56000, 57000, 58000, 59000],
+    "cer":         [33.55, 29.66, 29.55, 23.32, 22.91, 22.88, 22.84, 22.84, 22.68, 22.71, 22.65, 22.70, 22.47, 22.41, 22.25, 22.30, 22.10, 22.03, 22.27, 21.97, 21.83, 21.93],
+    "wer":         [85.55, 81.18, 80.57, 70.22, 69.44, 69.20, 69.31, 69.11, 68.67, 69.03, 68.65, 68.75, 68.30, 68.49, 67.91, 67.93, 67.60, 67.64, 68.06, 67.70, 67.28, 67.38],
+    "val_loss":    [null,  null,  null,  0.996, 0.984, 0.984, 0.982, 0.972, 0.967, 0.966, 0.962, 0.960, 0.958, 0.956, 0.948, 0.945, 0.941, 0.939, 0.939, 0.936, 0.931, 0.928],
+    "space_frac":  [null,  null,  null,  0.196, 0.199, 0.205, 0.202, 0.215, 0.221, 0.202, 0.203, 0.195, 0.213, 0.206, 0.198, 0.188, 0.204, 0.207, 0.183, 0.204, 0.214, 0.209],
+    "geometry": {
+      "steps":     [40000, 42000, 44000, 46000, 48000, 50000, 52000, 54000, 56000, 58000],
+      "norm_mean": [58.59, 58.70, 58.57, 59.54, 59.35, 59.24, 59.06, 58.64, 58.62, 59.14],
+      "norm_std":  [41.56, 41.58, 41.69, 42.61, 42.56, 42.31, 42.73, 42.00, 41.61, 42.58],
+      "isotropy":  [0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003, 0.003],
+      "active_dims":[256,  256,   256,   256,   256,   256,   256,   256,   256,   256]
+    },
+    "best_checkpoint": {
+      "step": 58000,
+      "cer": 21.83,
+      "wer": 67.28,
+      "val_loss": 0.931
+    }
+  }
+}

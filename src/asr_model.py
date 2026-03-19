@@ -3,37 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Tuple
 
-class WhiteningNorm(nn.Module):
-    def __init__(self, dim, eps=1e-5, momentum=0.01):
-        super().__init__()
-        self.eps = eps
-        self.momentum = momentum
-        self.register_buffer("running_mean", torch.zeros(dim))
-        self.register_buffer("running_cov", torch.eye(dim))
-        self.weight = nn.Parameter(torch.ones(dim))
-        self.bias   = nn.Parameter(torch.zeros(dim))
-
-    def forward(self, x):
-        # x: (B, T, dim)
-        if self.training:
-            B, T, D = x.shape
-            x_flat = x.reshape(-1, D)
-            mean = x_flat.mean(0)
-            centered = x_flat - mean
-            cov = (centered.T @ centered) / (x_flat.shape[0] - 1)
-            self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
-            self.running_cov  = (1 - self.momentum) * self.running_cov  + self.momentum * cov
-        else:
-            mean = self.running_mean
-            cov  = self.running_cov
-
-        # Whiten
-        U, S, _ = torch.linalg.svd(cov + self.eps * torch.eye(cov.shape[0], device=cov.device))
-        W = U @ torch.diag(1.0 / S.sqrt()) @ U.T
-        x_centered = x - mean
-        x_white = x_centered @ W.T
-        return x_white * self.weight + self.bias
-
 class NepaliASR(nn.Module):
     def __init__(
         self,

@@ -1,0 +1,42 @@
+{
+  "_notes": {
+    "source": "Reconstructed from training logs across conversation history",
+    "phase1": "Steps 0-40000: raw CNN features as targets, no quantizer",
+    "phase2": "Steps 40000-60000: gradual quantizer blending, alpha 0->1 over 20k steps",
+    "collapse": "Step 60000: norm explosion when alpha=1.0, training stopped",
+    "best_checkpoint": "Step 55000: ABX=0.887, isotropy=0.361, active_dims=255",
+    "variance_penalty_added": "Step 30000 resume: var_penalty fixed dimensional collapse",
+    "norm_penalty_reduced": "Step 30000 resume: norm_penalty weight 0.01 -> 0.001"
+  },
+
+  "phase1": {
+    "description": "Phase 1 — CNN features as targets, no quantizer (steps 0-40000)",
+    "steps":           [0,    5000, 8000, 11000, 28000, 30000, 31000, 32000, 33000, 36000, 40000],
+    "contrast_loss":   [4.65, 3.68, null, null,  null,  3.03,  2.99,  2.97,  2.90,  2.88,  2.87],
+    "active_dims":     [256,  203,  104,  56,    20,    99,    90,    39,    228,   245,   245],
+    "active_dims_pct": [100,  79,   41,   22,    8,     39,    35,    15,    89,    96,    96],
+    "isotropy":        [null, null, null, null,  null,  0.368, null,  0.300, 0.347, 0.469, 0.378],
+    "norm_mean":       [null, null, null, null,  null,  0.240, null,  0.231, 0.370, 0.373, 0.396],
+    "norm_std":        [null, null, null, null,  null,  0.070, null,  0.032, 0.052, 0.055, 0.077],
+    "abx_proxy":       [null, null, null, null,  null,  0.839, null,  0.821, 0.860, 0.860, 0.842],
+    "collapse_score":  [null, null, null, null,  null,  0.631, null,  0.407, 0.341, 0.474, 0.415],
+    "perplexity":      [null, null, null, null,  null,  null,  null,  null,  null,  null,  null],
+    "alpha":           [0,    0,    0,    0,     0,     0,     0,     0,     0,     0,     0]
+  },
+
+  "phase2": {
+    "description": "Phase 2 — quantizer blending alpha 0->1 over steps 40000-60000",
+    "steps":           [40000, 41000, 42000, 49000, 55000, 60000, 61000, 64000, 74000, 85000],
+    "contrast_loss":   [2.87,  null,  null,  null,  null,  2.94,  null,  null,  null,  null],
+    "active_dims":     [244,   246,   251,   256,   255,   255,   1,     256,   0,     1],
+    "active_dims_pct": [95,    96,    98,    100,   99,    99,    0.4,   100,   0,     0.4],
+    "isotropy":        [0.384, null,  null,  0.341, 0.361, 0.066, null,  null,  null,  null],
+    "norm_mean":       [0.401, null,  null,  0.502, 0.501, 3.278, null,  10.6,  null,  null],
+    "norm_std":        [0.079, null,  null,  0.077, 0.077, 1.158, null,  null,  null,  null],
+    "abx_proxy":       [0.842, null,  null,  0.872, 0.887, 0.878, 0.866, null,  0.679, 0.688],
+    "collapse_score":  [0.415, null,  null,  0.439, 0.411, 0.936, null,  null,  null,  null],
+    "perplexity":      [306,   319,   319,   320,   null,  null,  null,  null,  null,  null],
+    "alpha":           [0.0,   0.05,  0.1,   0.465, 0.75,  1.0,   1.0,   1.0,   1.0,   1.0],
+    "collapse_event":  [false, false, false, false, false, true,  true,  true,  true,  true]
+  }
+}
