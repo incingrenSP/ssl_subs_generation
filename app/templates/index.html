@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="ne">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Nepali ASR — Subtitle Generator</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=IBM+Plex+Mono:wght@300;400;500&family=Noto+Sans+Devanagari:wght@300;400;600&display=swap" rel="stylesheet"/>
+<style>
+/* ── Reset & Variables ─────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #0d0d0e;
+  --surface: #161618;
+  --card:    #1c1c1f;
+  --border:  #2a2a2f;
+  --gold:    #c9a84c;
+  --gold-lt: #e8c97a;
+  --red:     #d05050;
+  --text:    #e2ddd5;
+  --muted:   #6b6765;
+  --active:  #c9a84c22;
+  --radius:  8px;
+  --mono: "IBM Plex Mono", monospace;
+  --serif: "Playfair Display", serif;
+  --deva: "Noto Sans Devanagari", sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+/* ── Grain overlay ─────────────────────────── */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+}
+
+/* ── Layout ────────────────────────────────── */
+.shell {
+  position: relative; z-index: 1;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px 80px;
+}
+
+/* ── Header ────────────────────────────────── */
+header {
+  padding: 52px 0 36px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 48px;
+}
+.logo-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.logo-text {
+  font-family: var(--serif);
+  font-size: 2rem;
+  color: var(--gold);
+  letter-spacing: 0.02em;
+}
+.logo-tag {
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 100px;
+}
+header p {
+  color: var(--muted);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+}
+
+/* ── Upload card ───────────────────────────── */
+.upload-zone {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 56px 32px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .25s, background .25s;
+  position: relative;
+}
+.upload-zone:hover,
+.upload-zone.drag-over {
+  border-color: var(--gold);
+  background: var(--active);
+}
+.upload-icon {
+  width: 48px; height: 48px;
+  margin: 0 auto 18px;
+  opacity: .45;
+}
+.upload-title {
+  font-size: 1rem;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+.upload-sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+.upload-sub span { color: var(--gold); }
+#fileInput { display: none; }
+
+/* ── Progress ──────────────────────────────── */
+.progress-wrap {
+  margin-top: 28px;
+  display: none;
+}
+.progress-bar-bg {
+  height: 3px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold), var(--gold-lt));
+  border-radius: 999px;
+  width: 0%;
+  transition: width .4s ease;
+}
+.progress-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ── Error banner ──────────────────────────── */
+.error-banner {
+  display: none;
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #3a0a0a;
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  color: #ff8a8a;
+  font-size: 0.78rem;
+}
+
+/* ── Main result panel ─────────────────────── */
+#resultPanel { display: none; margin-top: 48px; }
+
+.panel-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Audio player ──────────────────────────── */
+.player-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  margin-bottom: 32px;
+}
+.player-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.player-filename {
+  font-size: 0.8rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+.player-duration {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+audio#audioPlayer {
+  width: 100%;
+  outline: none;
+  filter: invert(0);
+}
+audio#audioPlayer::-webkit-media-controls-panel {
+  background: var(--surface);
+}
+
+/* Custom waveform timeline */
+.seek-bar-wrap {
+  position: relative;
+  height: 36px;
+  margin: 12px 0 8px;
+  cursor: pointer;
+}
+.seek-bar-bg {
+  position: absolute;
+  top: 50%; left: 0; right: 0;
+  transform: translateY(-50%);
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+}
+.seek-bar-fill {
+  height: 100%;
+  background: var(--gold);
+  border-radius: 2px;
+  width: 0%;
+  transition: width .1s linear;
+}
+.seek-bar-thumb {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 14px; height: 14px;
+  background: var(--gold);
+  border-radius: 50%;
+  left: 0%;
+  transition: left .1s linear;
+}
+
+/* Time row */
+.time-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+/* Controls */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.btn-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--gold);
+  color: #000;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform .15s, background .15s;
+}
+.btn-play:hover { background: var(--gold-lt); transform: scale(1.08); }
+.btn-play svg { width: 16px; height: 16px; }
+
+.speed-select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* ── Subtitle list ─────────────────────────── */
+.subtitle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.subtitle-list::-webkit-scrollbar { width: 4px; }
+.subtitle-list::-webkit-scrollbar-track { background: transparent; }
+.subtitle-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.sub-entry {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 16px;
+  align-items: start;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background .2s, border-color .2s;
+}
+.sub-entry:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.sub-entry.active {
+  background: var(--active);
+  border-color: var(--gold);
+}
+.sub-ts {
+  font-size: 0.68rem;
+  color: var(--gold);
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.sub-text {
+  font-family: var(--deva);
+  font-size: 0.92rem;
+  color: var(--text);
+  line-height: 1.65;
+}
+
+/* Floating subtitle overlay (shows current line above audio) */
+.sub-overlay {
+  margin-bottom: 20px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 20px;
+  font-family: var(--deva);
+  font-size: 1.05rem;
+  color: var(--gold-lt);
+  text-align: center;
+  letter-spacing: 0.02em;
+  transition: opacity .3s;
+}
+
+/* ── Action row ────────────────────────────── */
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 18px;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background .2s, color .2s;
+  border: none;
+}
+.btn-primary {
+  background: var(--gold);
+  color: #000;
+}
+.btn-primary:hover { background: var(--gold-lt); }
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover { color: var(--text); border-color: var(--text); }
+
+/* ── Stats row ─────────────────────────────── */
+.stats-row {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding: 14px 20px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat-val {
+  font-size: 1.1rem;
+  color: var(--gold);
+  font-family: var(--serif);
+}
+.stat-key {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ── Info footer ───────────────────────────── */
+.info-section {
+  margin-top: 56px;
+  padding-top: 32px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 28px;
+}
+.info-card {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.info-card h3 {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
+.info-card p, .info-card li {
+  font-size: 0.76rem;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.info-card ul { padding-left: 16px; }
+.info-card code {
+  background: var(--surface);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--gold-lt);
+  font-size: 0.72rem;
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Header -->
+  <header>
+    <div class="logo-row">
+      <span class="logo-text">Nepali ASR</span>
+      <span class="logo-tag">SSL · CTC · Subtitle</span>
+    </div>
+    <p>Upload audio or video → automatic Nepali subtitle generation via Self-Supervised Learning</p>
+  </header>
+
+  <!-- Upload Zone -->
+  <div class="upload-zone" id="uploadZone">
+    <svg class="upload-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M24 32V16m0 0-6 6m6-6 6 6" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M10 34a8 8 0 0 1 0-16h1.5A11 11 0 0 1 34 14.5 8 8 0 0 1 38 30H10z" stroke-linecap="round"/>
+    </svg>
+    <p class="upload-title">Drop audio or video file here</p>
+    <p class="upload-sub">
+      Audio: <span>.wav .mp3 .flac .ogg .m4a</span> &nbsp;|&nbsp;
+      Video: <span>.mp4 .mkv .mov .avi .webm</span>
+    </p>
+    <p class="upload-sub" style="margin-top:8px;">or <span style="cursor:pointer;" onclick="document.getElementById('fileInput').click()">click to browse</span></p>
+    <input type="file" id="fileInput" accept=".wav,.mp3,.flac,.ogg,.m4a,.aac,.mp4,.mkv,.mov,.avi,.webm,.ts"/>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progressBar"></div>
+    </div>
+    <div class="progress-label" id="progressLabel">Preparing…</div>
+  </div>
+
+  <!-- Error banner -->
+  <div class="error-banner" id="errorBanner"></div>
+
+  <!-- Result panel -->
+  <div id="resultPanel">
+
+    <!-- Audio player -->
+    <div class="panel-label">Playback</div>
+    <div class="player-card">
+      <div class="player-info">
+        <span class="player-filename" id="playerFilename">—</span>
+        <span class="player-duration" id="playerDuration">0:00</span>
+      </div>
+
+      <!-- Current subtitle overlay -->
+      <div class="sub-overlay" id="subOverlay">—</div>
+
+      <!-- Seek bar -->
+      <div class="seek-bar-wrap" id="seekBarWrap">
+        <div class="seek-bar-bg">
+          <div class="seek-bar-fill" id="seekFill"></div>
+        </div>
+        <div class="seek-bar-thumb" id="seekThumb"></div>
+      </div>
+      <div class="time-row">
+        <span id="timeCurrent">0:00</span>
+        <span id="timeTotal">0:00</span>
+      </div>
+
+      <div class="controls">
+        <button class="btn-play" id="btnPlay" title="Play / Pause">
+          <svg id="iconPlay" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg id="iconPause" style="display:none" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+        </button>
+        <select class="speed-select" id="speedSelect" title="Playback speed">
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option>
+          <option value="2">2×</option>
+        </select>
+      </div>
+
+      <!-- Hidden native audio element -->
+      <audio id="audioPlayer" preload="auto"></audio>
+
+      <!-- Stats -->
+      <div class="stats-row" id="statsRow">
+        <div class="stat"><div class="stat-val" id="statDuration">—</div><div class="stat-key">Duration</div></div>
+        <div class="stat"><div class="stat-val" id="statChunks">—</div><div class="stat-key">Chunks (15s)</div></div>
+        <div class="stat"><div class="stat-val" id="statLines">—</div><div class="stat-key">Subtitle lines</div></div>
+        <div class="stat"><div class="stat-val" id="statDevice">—</div><div class="stat-key">Inferred on</div></div>
+      </div>
+    </div>
+
+    <!-- Subtitle list -->
+    <div class="panel-label">Subtitles</div>
+    <div class="subtitle-list" id="subtitleList"></div>
+
+    <!-- Actions -->
+    <div class="action-row">
+      <a class="btn btn-primary" id="btnDownload" href="#" download>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-16v10.17l-3.59-3.58L7 12l5 5 5-5-1.41-1.41L13 14.17V4h-1z"/></svg>
+        Download .srt
+      </a>
+      <button class="btn btn-ghost" id="btnReset">Upload another file</button>
+    </div>
+  </div><!-- /resultPanel -->
+
+  <!-- Info cards -->
+  <div class="info-section">
+    <div class="info-card">
+      <h3>How it works</h3>
+      <ul>
+        <li>Video files → FFmpeg audio extraction</li>
+        <li>Audio resampled to 16 kHz mono</li>
+        <li>Sliding 15-second window with 1s overlap</li>
+        <li>Each chunk → SSL encoder → CTC head → greedy decode</li>
+        <li>Timestamps written to .srt</li>
+      </ul>
+    </div>
+    <div class="info-card">
+      <h3>Supported formats</h3>
+      <p style="margin-bottom:6px"><strong style="color:var(--text)">Audio</strong></p>
+      <p><code>.wav</code> <code>.mp3</code> <code>.flac</code> <code>.ogg</code> <code>.m4a</code></p>
+      <p style="margin-top:8px;margin-bottom:6px"><strong style="color:var(--text)">Video</strong></p>
+      <p><code>.mp4</code> <code>.mkv</code> <code>.mov</code> <code>.avi</code> <code>.webm</code></p>
+    </div>
+    <div class="info-card">
+      <h3>Model</h3>
+      <p>Self-supervised CNN + Transformer encoder pre-trained on Nepali speech, fine-tuned with CTC loss for character-level transcription.</p>
+    </div>
+  </div>
+
+</div><!-- /shell -->
+
+<script>
+/* ── State ─────────────────────────────────── */
+let entries   = [];
+let jobId     = null;
+let duration  = 0;
+let activeIdx = -1;
+let isDraggingSeek = false;
+
+const audio       = document.getElementById("audioPlayer");
+const subList     = document.getElementById("subtitleList");
+const subOverlay  = document.getElementById("subOverlay");
+const seekFill    = document.getElementById("seekFill");
+const seekThumb   = document.getElementById("seekThumb");
+const timeCurrent = document.getElementById("timeCurrent");
+const timeTotal   = document.getElementById("timeTotal");
+const btnPlay     = document.getElementById("btnPlay");
+const iconPlay    = document.getElementById("iconPlay");
+const iconPause   = document.getElementById("iconPause");
+const progressBar = document.getElementById("progressBar");
+const progressLabel = document.getElementById("progressLabel");
+
+/* ── Helpers ───────────────────────────────── */
+function fmt(s) {
+  s = Math.max(0, s);
+  const m = Math.floor(s / 60), ss = Math.floor(s % 60);
+  return `${m}:${ss.toString().padStart(2,'0')}`;
+}
+
+function fmtSRT(s) {
+  s = Math.max(0, s);
+  const h = Math.floor(s/3600); s -= h*3600;
+  const m = Math.floor(s/60);   s -= m*60;
+  const sec = Math.floor(s);
+  const ms  = Math.round((s - sec)*1000);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+
+/* ── Upload zone ───────────────────────────── */
+const zone = document.getElementById("uploadZone");
+const fi   = document.getElementById("fileInput");
+
+zone.addEventListener("click", () => fi.click());
+zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("drag-over"); });
+zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+zone.addEventListener("drop", e => {
+  e.preventDefault();
+  zone.classList.remove("drag-over");
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fi.addEventListener("change", () => { if (fi.files.length) handleFile(fi.files[0]); });
+
+/* ── Handle file ───────────────────────────── */
+async function handleFile(file) {
+  reset();
+  showProgress("Uploading file…", 10);
+  hideError();
+
+  const fd = new FormData();
+  fd.append("file", file);
+
+  let resp;
+  try {
+    showProgress("Processing audio…", 35);
+    resp = await fetch("/transcribe", { method: "POST", body: fd });
+  } catch(e) {
+    return showError("Network error: " + e.message);
+  }
+
+  showProgress("Running transcription…", 70);
+  let data;
+  try {
+    data = await resp.json();
+  } catch(e) {
+    return showError("Invalid server response.");
+  }
+
+  if (!resp.ok || data.error) {
+    return showError(data.error || "Unknown error");
+  }
+
+  showProgress("Building subtitles…", 95);
+  await new Promise(r => setTimeout(r, 300));
+  hideProgress();
+
+  renderResult(file.name, data);
+}
+
+/* ── Render result ─────────────────────────── */
+function renderResult(filename, data) {
+  entries  = data.entries || [];
+  jobId    = data.job_id;
+  duration = data.duration;
+
+  // Audio player
+  audio.src = data.audio_url;
+  document.getElementById("playerFilename").textContent = filename;
+  document.getElementById("playerDuration").textContent = fmt(duration);
+  document.getElementById("timeTotal").textContent = fmt(duration);
+
+  // Stats
+  document.getElementById("statDuration").textContent = fmt(duration);
+  const chunks = Math.ceil(duration / 14);  // approx stride-based
+  document.getElementById("statChunks").textContent = chunks;
+  document.getElementById("statLines").textContent   = entries.length;
+  document.getElementById("statDevice").textContent  = "Server";
+
+  // Download link
+  document.getElementById("btnDownload").href = "/download_srt/" + jobId;
+
+  // Build subtitle list
+  subList.innerHTML = "";
+  entries.forEach((e, i) => {
+    const div = document.createElement("div");
+    div.className = "sub-entry";
+    div.dataset.idx = i;
+    div.innerHTML = `
+      <div class="sub-ts">${fmtSRT(e.start)}<br/>${fmtSRT(e.end)}</div>
+      <div class="sub-text">${escHtml(e.text)}</div>`;
+    div.addEventListener("click", () => {
+      audio.currentTime = e.start;
+      audio.play();
+    });
+    subList.appendChild(div);
+  });
+
+  // Show panel
+  document.getElementById("resultPanel").style.display = "block";
+  document.getElementById("resultPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* ── Audio events ──────────────────────────── */
+audio.addEventListener("timeupdate", () => {
+  if (isDraggingSeek) return;
+  const t = audio.currentTime;
+  const d = audio.duration || duration || 1;
+  const pct = Math.min(100, (t / d) * 100);
+  seekFill.style.width  = pct + "%";
+  seekThumb.style.left  = pct + "%";
+  timeCurrent.textContent = fmt(t);
+
+  // Update active subtitle
+  let cur = -1;
+  for (let i = 0; i < entries.length; i++) {
+    if (t >= entries[i].start && t <= entries[i].end) { cur = i; break; }
+  }
+  if (cur !== activeIdx) {
+    if (activeIdx >= 0) {
+      const prev = subList.children[activeIdx];
+      if (prev) prev.classList.remove("active");
+    }
+    if (cur >= 0) {
+      const el = subList.children[cur];
+      if (el) {
+        el.classList.add("active");
+        el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        subOverlay.textContent = entries[cur].text;
+      } else {
+        subOverlay.textContent = "—";
+      }
+    } else {
+      subOverlay.textContent = "—";
+    }
+    activeIdx = cur;
+  }
+});
+
+audio.addEventListener("play",  () => { iconPlay.style.display="none"; iconPause.style.display="block"; });
+audio.addEventListener("pause", () => { iconPlay.style.display="block"; iconPause.style.display="none"; });
+audio.addEventListener("ended", () => { iconPlay.style.display="block"; iconPause.style.display="none"; });
+audio.addEventListener("loadedmetadata", () => {
+  document.getElementById("timeTotal").textContent = fmt(audio.duration);
+});
+
+btnPlay.addEventListener("click", () => {
+  if (audio.paused) audio.play();
+  else              audio.pause();
+});
+
+document.getElementById("speedSelect").addEventListener("change", e => {
+  audio.playbackRate = parseFloat(e.target.value);
+});
+
+/* ── Custom seek bar ───────────────────────── */
+const seekWrap = document.getElementById("seekBarWrap");
+
+function seekTo(clientX) {
+  const rect = seekWrap.getBoundingClientRect();
+  let pct = (clientX - rect.left) / rect.width;
+  pct = Math.max(0, Math.min(1, pct));
+  const d = audio.duration || duration;
+  audio.currentTime = pct * d;
+  seekFill.style.width = (pct * 100) + "%";
+  seekThumb.style.left = (pct * 100) + "%";
+}
+
+seekWrap.addEventListener("mousedown", e => { isDraggingSeek = true; seekTo(e.clientX); });
+document.addEventListener("mousemove", e => { if (isDraggingSeek) seekTo(e.clientX); });
+document.addEventListener("mouseup",   () => { isDraggingSeek = false; });
+
+seekWrap.addEventListener("touchstart", e => { isDraggingSeek = true; seekTo(e.touches[0].clientX); });
+document.addEventListener("touchmove",  e => { if (isDraggingSeek) seekTo(e.touches[0].clientX); });
+document.addEventListener("touchend",   () => { isDraggingSeek = false; });
+
+/* ── Reset ─────────────────────────────────── */
+function reset() {
+  entries = []; jobId = null; duration = 0; activeIdx = -1;
+  audio.pause(); audio.src = "";
+  document.getElementById("resultPanel").style.display = "none";
+  subList.innerHTML = "";
+  subOverlay.textContent = "—";
+  seekFill.style.width = "0%";
+  seekThumb.style.left = "0%";
+  timeCurrent.textContent = "0:00";
+  fi.value = "";
+}
+document.getElementById("btnReset").addEventListener("click", () => {
+  reset(); hideProgress(); hideError();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+/* ── Progress / error ──────────────────────── */
+function showProgress(msg, pct) {
+  const w = document.getElementById("progressWrap");
+  w.style.display = "block";
+  progressBar.style.width = pct + "%";
+  progressLabel.textContent = msg;
+}
+function hideProgress() {
+  document.getElementById("progressWrap").style.display = "none";
+  progressBar.style.width = "0%";
+}
+function showError(msg) {
+  hideProgress();
+  const b = document.getElementById("errorBanner");
+  b.style.display = "block";
+  b.textContent = "⚠ " + msg;
+}
+function hideError() {
+  document.getElementById("errorBanner").style.display = "none";
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+</script>
+</body>
+</html>

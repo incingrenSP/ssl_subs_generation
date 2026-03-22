@@ -1,0 +1,44 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .dockerignore — files excluded from the Docker build context
+# Keeps the build fast by not sending unnecessary files to the Docker daemon
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Runtime directories (created fresh in container)
+uploads/
+outputs/
+
+# Development files
+.git/
+.gitignore
+*.md
+*.ipynb
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+tests/
+benchmark/
+
+# IDE
+.vscode/
+.idea/
+
+# Data
+*.wav
+*.flac

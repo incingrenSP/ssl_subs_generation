@@ -5,3 +5,7 @@
 /checkpoints/
 *.pt
 *.txt
+*.bin
+*.wav
+*.flac
+*.srt

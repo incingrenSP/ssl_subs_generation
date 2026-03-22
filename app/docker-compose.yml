@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Nepali ASR — docker-compose
+# Usage:
+#   docker-compose up --build        first run (builds image)
+#   docker-compose up                subsequent runs (uses cached image)
+#   docker-compose down              stop and remove container
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  nepali-asr:
+    build: .
+    image: nepali-asr:latest
+    container_name: nepali-asr
+    ports:
+      - "5000:5000"         # http://localhost:5000
+    volumes:
+      # Persist uploaded audio and generated SRT files across restarts.
+      # Remove these lines if you want a fully stateless container.
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
