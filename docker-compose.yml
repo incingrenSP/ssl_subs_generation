@@ -11,7 +11,7 @@ services:
     image: nepali-asr:latest
     container_name: nepali-asr
     ports:
-      - "5000:5000"         # http://localhost:5000
+      - "8000:8000"         # http://localhost:8000
     volumes:
       # Persist uploaded audio and generated SRT files across restarts.
       # Remove these lines if you want a fully stateless container.

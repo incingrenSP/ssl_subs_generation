@@ -20,9 +20,9 @@ This project uses self-supervised framework inspired from wav2vec 2.0. The webap
 2. Open Terminal and run:
 ```
 docker pull incingren/nepali-asr:latest
-docker run -p 5000:5000 incingren/nepali-asr:latest
+docker run -p 8000:8000 incingren/nepali-asr:latest
 ```
-3. Go to: `https://localhost:5000`
+3. Go to: `https://localhost:8000`
 4. Drag and drop or browse to the source file to generate transcript.
 
 ---

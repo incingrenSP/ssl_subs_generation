@@ -81,11 +81,11 @@ class CNNEncoder(nn.Module):
         self.norm   = nn.LayerNorm(cfg.hidden_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, T_samples)
-        x = x.unsqueeze(1)              # (B, 1, T)
-        x = self.layers(x)              # (B, C, T')
-        x = x.transpose(1, 2)          # (B, T', C)
-        return self.norm(self.proj(x))  # (B, T', hidden_dim)
+        
+        x = x.unsqueeze(1)
+        x = self.layers(x)
+        x = x.transpose(1, 2)
+        return self.norm(self.proj(x))
 
 
 # Positional Encoding
@@ -97,7 +97,7 @@ class SinusoidalPE(nn.Module):
         div = torch.exp(torch.arange(0, dim, 2).float() * (-math.log(10000.0) / dim))
         pe[:, 0::2] = torch.sin(pos * div)
         pe[:, 1::2] = torch.cos(pos * div)
-        self.register_buffer("pe", pe.unsqueeze(0))  # (1, max_len, dim)
+        self.register_buffer("pe", pe.unsqueeze(0))
 
     def forward(self, x):
         return x + self.pe[:, :x.size(1)]
@@ -138,7 +138,7 @@ class ProductQuantizer(nn.Module):
         self.output_proj = nn.Linear(self.G * self.D, cfg.hidden_dim)
         nn.init.uniform_(self.codebook)
 
-        # Usage counter — reset every check interval in trainer
+        # reset every check interval in trainer
         self.register_buffer(
             "usage_count",
             torch.zeros(self.G, self.V, dtype=torch.long)
@@ -148,13 +148,13 @@ class ProductQuantizer(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,          # (B, T, hidden_dim)  — detached CNN features
+        x: torch.Tensor,
         tau: float = 1.0,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         
         B, T, _ = x.shape
 
-        logits = self.input_proj(x)                         # (B, T, G*V)
+        logits = self.input_proj(x)
         logits = logits.view(B, T, self.G, self.V)
 
         if self.training:
@@ -163,36 +163,36 @@ class ProductQuantizer(nn.Module):
             idx   = logits.argmax(dim=-1, keepdim=True)
             probs = torch.zeros_like(logits).scatter_(-1, idx, 1.0)
 
-        # ── Perplexity ────────────────────────
-        avg_probs  = probs.mean(dim=[0, 1])                 # (G, V)
+        # Perplexity 
+        avg_probs  = probs.mean(dim=[0, 1])
         perplexity = torch.exp(
             -(avg_probs * (avg_probs + 1e-9).log()).sum(dim=-1)
-        ).mean()                                            # scalar, max = V
+        ).mean()
 
-        # ── Update usage counts ───────────────
+        # Update usage counts
         with torch.no_grad():
-            hard_idx = logits.argmax(dim=-1)               # (B, T, G)
+            hard_idx = logits.argmax(dim=-1)
             for g in range(self.G):
                 codes, counts = hard_idx[:, :, g].unique(return_counts=True)
                 self.usage_count[g].scatter_add_(
                     0, codes, counts.to(self.usage_count.dtype)
                 )
 
-        # ── Weighted codebook lookup ──────────
-        q = torch.einsum("btgv,gvd->btgd", probs, self.codebook)  # (B, T, G, D)
-        q = self.output_proj(q.reshape(B, T, self.G * self.D))     # (B, T, hidden_dim)
+        # Weighted codebook lookup
+        q = torch.einsum("btgv,gvd->btgd", probs, self.codebook)
+        q = self.output_proj(q.reshape(B, T, self.G * self.D))
 
-        # ── Commitment loss ───────────────────
+        # Commitment loss 
         commit_loss = F.mse_loss(x, q.detach())
 
         return q, perplexity, commit_loss
 
-    # ── Dead code reset ───────────────────────
+    # Dead code reset
 
     @torch.no_grad()
     def reset_dead_codes(
         self,
-        encoder_outputs: torch.Tensor,   # (N, hidden_dim) — recent CNN frame features
+        encoder_outputs: torch.Tensor,
         threshold: int = 2,
     ) -> int:
         
@@ -202,17 +202,14 @@ class ProductQuantizer(nn.Module):
         candidates = encoder_outputs[torch.randperm(N, device=encoder_outputs.device)]
 
         for g in range(self.G):
-            dead_mask = self.usage_count[g] < threshold      # (V,)
+            dead_mask = self.usage_count[g] < threshold
             n_dead    = int(dead_mask.sum().item())
 
             if n_dead == 0:
                 continue
 
-            # replace_idx = torch.randperm(N, device=encoder_outputs.device)[:n_dead]
-            # new_vectors = candidates[replace_idx]            # (n_dead, hidden_dim)
-
             live_mask  = ~dead_mask
-            live_codes = self.codebook[g][live_mask]         # (n_live, D)
+            live_codes = self.codebook[g][live_mask]
 
             if live_codes.size(0) == 0:
                 # Entire codebook dead — re-init from scratch
@@ -248,60 +245,59 @@ def compute_mask(lengths: torch.Tensor, mask_prob: float, mask_length: int,
     return mask
 
 def local_contrastive_loss(
-    context:       torch.Tensor,   # (B, T, H)
-    targets:       torch.Tensor,   # (B, T, H)
-    mask:          torch.Tensor,   # (B, T) bool
-    frame_lengths: torch.Tensor,   # (B,)
+    context:       torch.Tensor, 
+    targets:       torch.Tensor,
+    mask:          torch.Tensor,
+    frame_lengths: torch.Tensor,
     num_negatives: int,
     temperature:   float,
 ) -> torch.Tensor:
     B, T, H = context.shape
     device  = context.device
 
-    # ── Gather all masked positions across the batch at once ──────────
-    # mask: (B, T) → flat indices into (B*T)
-    flat_mask    = mask.reshape(-1)                          # (B*T,)
-    flat_context = context.reshape(-1, H)                    # (B*T, H)
-    flat_targets = targets.reshape(-1, H)                    # (B*T, H)
+    # Gather all masked positions across the batch at once
+    flat_mask    = mask.reshape(-1)
+    flat_context = context.reshape(-1, H)
+    flat_targets = targets.reshape(-1, H)
 
     if flat_mask.sum() == 0:
         return torch.tensor(0.0, device=device, requires_grad=True)
 
     # Which batch item does each masked position belong to?
     batch_idx = torch.arange(B, device=device).unsqueeze(1) \
-                     .expand(B, T).reshape(-1)[flat_mask]   # (N_masked,)
+                     .expand(B, T).reshape(-1)[flat_mask]
 
-    queries   = flat_context[flat_mask]                      # (N_masked, H)
-    positives = flat_targets[flat_mask]                      # (N_masked, H)
+    queries   = flat_context[flat_mask]
+    positives = flat_targets[flat_mask]
     N_masked  = queries.size(0)
 
-    # ── Sample negatives — one row per masked frame ───────────────────
-    frame_starts = (batch_idx * T)                           # (N_masked,) — utterance offsets
+    # Sample negatives — one row per masked frame
+    frame_starts = (batch_idx * T)
 
     neg_offsets  = torch.randint(
         0, T, (N_masked, num_negatives), device=device
-    )                                                        # (N_masked, num_neg)
+    )
 
     # Clamp to valid frame range per utterance using frame_lengths
-    valid_len    = frame_lengths[batch_idx].unsqueeze(1)     # (N_masked, 1)
-    neg_offsets  = neg_offsets % valid_len                   # wrap into valid range
+    valid_len    = frame_lengths[batch_idx].unsqueeze(1)
+    neg_offsets  = neg_offsets % valid_len
 
-    neg_flat_idx = frame_starts.unsqueeze(1) + neg_offsets   # (N_masked, num_neg)
+    neg_flat_idx = frame_starts.unsqueeze(1) + neg_offsets
     negatives    = flat_targets[neg_flat_idx.view(-1)] \
-                               .view(N_masked, num_negatives, H)  # (N_masked, num_neg, H)
+                               .view(N_masked, num_negatives, H)
 
-    # ── Cosine similarity logits ──────────────────────────────────────
+    # Cosine similarity logits
     candidates = torch.cat(
         [positives.unsqueeze(1), negatives], dim=1
-    )                                                        # (N_masked, 1+num_neg, H)
+    )
 
-    q_norm = F.normalize(queries,    dim=-1)                 # (N_masked, H)
-    c_norm = F.normalize(candidates, dim=-1)                 # (N_masked, 1+num_neg, H)
+    q_norm = F.normalize(queries,    dim=-1)
+    c_norm = F.normalize(candidates, dim=-1)
 
     logits = torch.bmm(
         q_norm.unsqueeze(1),
         c_norm.transpose(1, 2)
-    ).squeeze(1) / temperature                               # (N_masked, 1+num_neg)
+    ).squeeze(1) / temperature
 
     labels = torch.zeros(N_masked, dtype=torch.long, device=device)
 

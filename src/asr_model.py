@@ -11,16 +11,14 @@ class NepaliASR(nn.Module):
         freeze_encoder: bool = True,
     ):
         super().__init__()
-
-        # Pull encoder components from SSL model
-        self.encoder  = ssl_model.cnn      # CNNEncoder
-        self.context  = ssl_model.context  # TransformerEncoder
-        hidden_dim    = ssl_model.cfg.hidden_dim  # 256
+        
+        self.encoder  = ssl_model.cnn
+        self.context  = ssl_model.context
+        hidden_dim    = ssl_model.cfg.hidden_dim
         
         self.pre_head_norm = nn.LayerNorm(hidden_dim)
         # self.pre_head_norm = WhiteningNorm(hidden_dim)
 
-        # CTC projection head
         self.ctc_head = nn.Linear(hidden_dim, vocab_size)
         nn.init.normal_(self.ctc_head.weight, mean=0, std=0.02)
         nn.init.zeros_(self.ctc_head.bias)
@@ -49,11 +47,10 @@ class NepaliASR(nn.Module):
         self.unfreeze_transformer()
         self.unfreeze_cnn()
 
-    # Forward
     def forward(
         self,
-        waveform: torch.Tensor,         # (B, T_samples)
-        lengths:  Optional[torch.Tensor] = None,  # (B,) sample lengths
+        waveform: torch.Tensor,
+        lengths:  Optional[torch.Tensor] = None,
         spec_aug = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
@@ -64,7 +61,7 @@ class NepaliASR(nn.Module):
             lengths = torch.full((B,), T_wav, device=device, dtype=torch.long)
 
         # CNN feature
-        features = self.encoder(waveform)               # (B, T, 256)
+        features = self.encoder(waveform)
         T = features.size(1)
         
         # Check Spectral Augmentation
@@ -74,21 +71,21 @@ class NepaliASR(nn.Module):
         # Compute valid frame lengths from sample lengths
         frame_lengths = (
             lengths.float() / T_wav * T
-        ).long().clamp(max=T)                           # (B,)
+        ).long().clamp(max=T)
 
         # Padding mask for transformer (True = padding)
         pad_mask = (
             torch.arange(T, device=device).unsqueeze(0)
             >= frame_lengths.unsqueeze(1)
-        )                                               # (B, T)
+        )
 
         # Transformer context
-        context = self.context(features, padding_mask=pad_mask)  # (B, T, 256)
+        context = self.context(features, padding_mask=pad_mask)
         context = self.pre_head_norm(context)
 
         # CTC head
-        logits    = self.ctc_head(context)              # (B, T, vocab_size)
-        log_probs = F.log_softmax(logits, dim=-1)       # (B, T, vocab_size)
+        logits    = self.ctc_head(context)
+        log_probs = F.log_softmax(logits, dim=-1)
 
         return log_probs, frame_lengths
 

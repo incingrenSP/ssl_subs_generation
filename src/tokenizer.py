@@ -3,8 +3,8 @@ import re
 from pathlib import Path
 from typing import List, Optional
 import unicodedata
+from collections import Counter
 
-from src.requirements import *
 import grapheme
 import pandas as pd
 
@@ -26,7 +26,7 @@ class GraphemeTokenizer:
     # Special tokens — same IDs as CharTokenizer for compatibility
     PAD_TOKEN   = '<pad>'
     UNK_TOKEN   = '<unk>'
-    BLANK_TOKEN = '<blank>'   # CTC blank — must be index 0
+    BLANK_TOKEN = '<blank>'
     SPACE_TOKEN = '<space>'
 
     def __init__(self, vocab_size: Optional[int] = None, add_space_token: bool = True):
@@ -83,8 +83,6 @@ class GraphemeTokenizer:
         if tokens and tokens[-1] in (self.SPACE_TOKEN, ' '):
             tokens.pop()
         return tokens
-
-    # Public API
 
     def clean_text(self, text: str) -> str:
         for junk in self.JUNK_CHARS:
@@ -222,7 +220,7 @@ class CharTokenizer:
     # Special tokens
     PAD_TOKEN = '<pad>'
     UNK_TOKEN = '<unk>'
-    BLANK_TOKEN = '<blank>'  # CTC blank
+    BLANK_TOKEN = '<blank>'
     SPACE_TOKEN = '<space>'
     
     def __init__(self, vocab_size: Optional[int] = None, add_space_token: bool = True):
@@ -242,13 +240,13 @@ class CharTokenizer:
     
     def _add_special_tokens(self):
         special_tokens = [
-            self.BLANK_TOKEN,  # ID: 0 (CTC blank)
-            self.PAD_TOKEN,    # ID: 1
-            self.UNK_TOKEN,    # ID: 2
+            self.BLANK_TOKEN,
+            self.PAD_TOKEN,
+            self.UNK_TOKEN,
         ]
         
         if self.add_space_token:
-            special_tokens.append(self.SPACE_TOKEN)  # ID: 3
+            special_tokens.append(self.SPACE_TOKEN)
         
         for token in special_tokens:
             self._add_token(token)
@@ -274,13 +272,10 @@ class CharTokenizer:
         return text
     
     def _is_devanagari(self, char: str) -> bool:
-        """Check if character is in Devanagari Unicode block"""
         if len(char) != 1:
             return False
         
         code_point = ord(char)
-        # Devanagari block: U+0900 to U+097F
-        # Devanagari Extended: U+A8E0 to U+A8FF
         return (0x0900 <= code_point <= 0x097F) or (0xA8E0 <= code_point <= 0xA8FF)
     
     def build_vocab_from_metadata(self, metadata_path: str, min_freq: int = 1):

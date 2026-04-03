@@ -1,8 +1,3 @@
-"""
-Complex ASR inference script with KenLM beam decoder.
-
-Usage: python complex_inference.py
-"""
 
 import json
 import random
@@ -11,26 +6,23 @@ import torch
 import soundfile as sf
 import numpy as np
 
-# ── CONFIG ────────────────────────────────────────────────────────────────────
 CHECKPOINT     = "deployment/asr_model_prototype.pt"
 TOKENIZER_PATH = "data/tokenizer.json"
 METADATA_PATH  = "data/metadata_normal.tsv"
 KENLM_PATH     = "deployment/nepali_kenlm.bin"
-NUM_SAMPLES    = 1000  # how many samples to test
+NUM_SAMPLES    = 1000
 OUTPUT_FILE    = "results.txt"
-RANDOM_SEED    = 42   # set to None for different samples each run
+RANDOM_SEED    = 42
 
-# KenLM decoder params — tune these after first run
+# KenLM decoder params
 ALPHA          = 0.5   # LM weight (higher = trust LM more)
-BETA           = 1.0   # word insertion bonus
+BETA           = 0.1   # word insertion bonus
 BEAM_WIDTH     = 100   # beam size (higher = better but slower)
-# ─────────────────────────────────────────────────────────────────────────────
 
 SAMPLE_RATE  = 16_000
 FRAME_STRIDE = 320
 
-
-# ── Audio ─────────────────────────────────────────────────────────────────────
+# Audio
 
 def load_audio(path):
     data, sr = sf.read(path, dtype="float32", always_2d=True)
@@ -45,7 +37,7 @@ def load_audio(path):
     return waveform
 
 
-# ── Metrics ───────────────────────────────────────────────────────────────────
+# Metrics
 
 def edit_distance(a, b):
     m, n = len(a), len(b)
@@ -77,7 +69,7 @@ def compute_cer(ref, hyp):
     return errors, len(ref)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main 
 
 def main():
     # Load tokenizer
@@ -85,8 +77,6 @@ def main():
         tok_data = json.load(f)
     id2char  = tok_data["id2char"]
 
-    # Build vocab list for pyctcdecode
-    # Must be ordered by token id, blank mapped to ""
     vocab_size = len(id2char)
     vocab = []
     for i in range(vocab_size):

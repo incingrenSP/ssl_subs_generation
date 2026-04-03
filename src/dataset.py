@@ -3,10 +3,9 @@ from typing import Optional, Dict, List
 import hashlib
 
 def _load_audio_sf(path: str, target_sr: int) -> torch.Tensor:
-    # always_2d=True → data is always (frames, channels)
+    # always_2d=True = data is always (frames, channels)
     data, sr = sf.read(str(path), dtype='float32', always_2d=True)
 
-    # Mix down to mono: (frames, channels) → (frames,)
     data = data.mean(axis=1)
 
     # Resample only if needed
@@ -21,7 +20,7 @@ def _load_audio_sf(path: str, target_sr: int) -> torch.Tensor:
 
 def _audio_duration_sf(path: str) -> float:
     info = sf.info(str(path))
-    return info.duration   # sndfile computes frames / samplerate internally
+    return info.duration
 
 
 # Dataset
@@ -84,8 +83,8 @@ class NepaliSpeechDataset(Dataset):
         return ('path' in first.lower()) and ('transcript' in first.lower())
 
     def _reconstruct_path(self, filename: str) -> Path:
-        filename = Path(str(filename).strip()).name   # drop any accidental dir prefix
-        subdir   = filename[:2]                       # e.g. "00", "01"
+        filename = Path(str(filename).strip()).name
+        subdir   = filename[:2]
         return self.audio_base_dir / "audio" / subdir / filename
 
     def _filter_by_length(self):
@@ -119,7 +118,7 @@ class NepaliSpeechDataset(Dataset):
                     for key in data.files:
                         idx = int(key.split('_')[1])
                         arr = data[key]
-                        # Empty array = invalid sample
+
                         self.cache_data[idx] = arr if arr.size > 0 else None
                 print(f"  Cache contains {len(self.cache_data)} entries.")
                 return
@@ -138,7 +137,7 @@ class NepaliSpeechDataset(Dataset):
                 self.cache_data[idx] = waveform.numpy()
             except Exception as exc:
                 print(f"  Error caching {audio_path}: {exc}")
-                # Store as empty array so the key exists
+
                 self.cache_data[idx] = None
 
             if (idx + 1) % 100 == 0:
@@ -164,19 +163,18 @@ class NepaliSpeechDataset(Dataset):
                 raise ValueError(f"Cache entry {idx} is invalid / missing.")
             return torch.from_numpy(arr).float()
 
-        # On-the-fly: soundfile decode + scipy resample
         filename   = self.metadata.iloc[idx]['path']
         audio_path = self._reconstruct_path(filename)
         return _load_audio_sf(str(audio_path), self.target_sr)
 
     def _extract_features(self, waveform: torch.Tensor) -> torch.Tensor:
         if not self.use_spectrogram:
-            return waveform                                    # (T,)
+            return waveform
 
-        # MelSpectrogram expects (channel, T) → add + remove channel dim
-        mel  = self.mel_transform(waveform.unsqueeze(0))      # (1, n_mels, T')
+        # MelSpectrogram expects (channel, T) -> add + remove channel dim
+        mel  = self.mel_transform(waveform.unsqueeze(0))
         logm = torch.log(mel + 1e-9)
-        return logm.squeeze(0)                                 # (n_mels, T')
+        return logm.squeeze(0)
 
 
     def __len__(self) -> int:
@@ -218,17 +216,15 @@ def collate_fn_ssl(batch: List[Dict]) -> Dict:
     names   = [item['filename']     for item in batch]
 
     if audios[0].dim() == 1:
-        # raw waveform path → simple pad_sequence
         padded = torch.nn.utils.rnn.pad_sequence(
             audios, batch_first=True, padding_value=0.0
-        )                                                       # (B, T_max)
+        )
     else:
-        # spectrogram path → manual zero-pad along time axis
         n_mels = audios[0].shape[0]
         T_max  = max(a.shape[-1] for a in audios)
         padded = torch.zeros(len(audios), n_mels, T_max)
         for i, a in enumerate(audios):
-            padded[i, :, :a.shape[-1]] = a                     # (B, n_mels, T_max)
+            padded[i, :, :a.shape[-1]] = a
 
     return {'waveform': padded, 'lengths': lengths, 'filenames': names}
 

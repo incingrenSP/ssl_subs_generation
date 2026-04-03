@@ -19,9 +19,7 @@ PALETTE = {
 ssl  = json.loads(Path("ssl_metrics.json").read_text())
 asr  = json.loads(Path("asr_metrics.json").read_text())
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Figure 1 — SSL Phase 1 + Phase 2: contrast loss, active dims, ABX
-# ─────────────────────────────────────────────────────────────────────────────
+# Figure 1 : SSL Phase 1 + Phase 2: contrast loss, active dims, ABX
 
 fig, axes = plt.subplots(3, 1, figsize=(10, 11), sharex=False)
 fig.suptitle("SSL Pretraining — Training Metrics", fontsize=14, fontweight="normal", y=0.98)
@@ -37,7 +35,7 @@ all_iso     = p1["isotropy"] + p2["isotropy"]
 all_norm    = p1["norm_mean"] + p2["norm_mean"]
 collapse_idx = p2["steps"].index(60000) + len(p1["steps"])
 
-# ── Axes 0: Contrast loss ─────────────────────────────────────────────────────
+# Axes 0: Contrast loss 
 ax = axes[0]
 valid = [(s, v) for s, v in zip(all_steps, all_contrast) if v is not None]
 xs, ys = zip(*valid)
@@ -56,7 +54,7 @@ ax.annotate("collapse", xy=(60000, 2.94), xytext=(62000, 3.4),
             fontsize=8, color=PALETTE["red"],
             arrowprops=dict(arrowstyle="->", color=PALETTE["red"], lw=0.8))
 
-# ── Axes 1: Active dimensions ─────────────────────────────────────────────────
+# Axes 1: Active dimensions 
 ax = axes[1]
 ax.plot(all_steps, all_active, color=PALETTE["green"], linewidth=2, marker="o", markersize=5, label="active dims %")
 ax.axvline(x=40000, color=PALETTE["gray"],  linewidth=1, linestyle="--", alpha=0.7)
@@ -75,7 +73,7 @@ ax.annotate("var_penalty fix:\n39% → 98%", xy=(33000, 89), xytext=(18000, 75),
             fontsize=8, color=PALETTE["green"],
             arrowprops=dict(arrowstyle="->", color=PALETTE["green"], lw=0.8))
 
-# ── Axes 2: ABX proxy ─────────────────────────────────────────────────────────
+# Axes 2: ABX proxy ────────────────────────────────────────────────────────
 ax = axes[2]
 valid_abx = [(s, v) for s, v in zip(all_steps, all_abx) if v is not None]
 xs_a, ys_a = zip(*valid_abx)
@@ -106,9 +104,7 @@ plt.show()
 print("saved: ssl_training_curves.png")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Figure 2 — SSL Geometry: isotropy and norm_mean
-# ─────────────────────────────────────────────────────────────────────────────
+# Figure 2 : SSL Geometry: isotropy and norm_mean
 
 fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
 fig.suptitle("SSL Pretraining — Representation Geometry", fontsize=14, fontweight="normal", y=0.98)
@@ -151,9 +147,7 @@ plt.show()
 print("saved: ssl_geometry.png")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Figure 3 — ASR: all runs CER comparison
-# ─────────────────────────────────────────────────────────────────────────────
+# Figure 3 : ASR: all runs CER comparison
 
 fig, ax = plt.subplots(figsize=(11, 6))
 fig.suptitle("ASR Fine-Tuning — CER Across All Runs", fontsize=14, fontweight="normal")
@@ -187,9 +181,7 @@ plt.show()
 print("saved: asr_cer_all_runs.png")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 4 — ASR Run 4: CER, WER, val loss, space fraction
-# ─────────────────────────────────────────────────────────────────────────────
 
 fig, axes = plt.subplots(3, 1, figsize=(11, 12), sharex=True)
 fig.suptitle("ASR Fine-Tuning — Run 4 (Final) Detailed Metrics", fontsize=14, fontweight="normal", y=0.98)
@@ -239,9 +231,7 @@ plt.show()
 print("saved: asr_run4_detail.png")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 5 — ASR Run 4: Representation geometry (norm, isotropy)
-# ─────────────────────────────────────────────────────────────────────────────
 
 fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
 fig.suptitle("ASR Fine-Tuning — Run 4 Representation Geometry", fontsize=14, fontweight="normal", y=0.98)

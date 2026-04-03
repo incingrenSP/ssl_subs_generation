@@ -120,7 +120,7 @@ def compute_feature_metrics(model, dataloader, device, n_samples: int = 500) -> 
         lengths  = batch["lengths"].to(device)
 
         # Extract context features
-        feats = model.extract_features(waveform, lengths)   # (B, T, H)
+        feats = model.extract_features(waveform, lengths)
         B, T, H = feats.shape
 
         # Pool per utterance (mean over non-padded frames)

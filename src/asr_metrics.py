@@ -20,8 +20,8 @@ def greedy_decode(log_probs: torch.Tensor, blank: int = 0) -> List[int]:
 
 
 def decode_batch(
-    log_probs: torch.Tensor,       # (B, T, vocab_size)
-    frame_lengths: torch.Tensor,   # (B,)
+    log_probs: torch.Tensor,
+    frame_lengths: torch.Tensor,
     tokenizer: CharTokenizer,
 ) -> List[str]:
 
@@ -43,12 +43,10 @@ def build_beam_decoder(
 ):
     from torchaudio.models.decoder import ctc_decoder
 
-    # Build tokens list — must match tokenizer exactly
-    # index 0 = blank, rest = id2char order
     tokens = []
     for i in range(tokenizer.get_vocab_size()):
         if i == tokenizer.blank_id:
-            tokens.append(tokenizer.BLANK_TOKEN)   # e.g. "<blank>"
+            tokens.append(tokenizer.BLANK_TOKEN)
         elif i in tokenizer.id2char:
             tokens.append(tokenizer.id2char[i])
         else:
@@ -57,13 +55,13 @@ def build_beam_decoder(
     # decoder = ctc_decoder(
     #     lexicon        = lexicon_path,
     #     tokens         = tokens,
-    #     lm             = None,           # no LM for now
+    #     lm             = None,
     #     nbest          = 1,
     #     beam_size      = beam_size,
     #     beam_size_token= 30,
     #     beam_threshold = beam_threshold,
-    #     sil_token      = tokenizer.SPACE_TOKEN,   # e.g. "<space>"
-    #     blank_token    = tokenizer.BLANK_TOKEN,   # e.g. "<blank>"
+    #     sil_token      = tokenizer.SPACE_TOKEN,
+    #     blank_token    = tokenizer.BLANK_TOKEN,
     # )
     
     decoder = ctc_decoder(
@@ -75,7 +73,7 @@ def build_beam_decoder(
         beam_size_token=10,
         beam_threshold=50,
         word_score=0,
-        unk_score=0,           # was float('-inf') — killed everything
+        unk_score=0,
         sil_score=0,
         log_add=False,
         blank_token='<blank>',
@@ -94,7 +92,7 @@ def beam_decode_batch(
     decoded = []
     for result in results:
         hyp = result[0]
-        # lexicon-free: tokens contains token indices, words is empty
+
         if hyp.words:
             text = " ".join(hyp.words)
         else:
@@ -162,11 +160,11 @@ def compute_cer_wer(
     total_words       = 0
 
     for hyp, ref in zip(hypotheses, references):
-        # CER — character level
+        # CER
         total_char_errors += edit_distance(list(hyp), list(ref))
         total_chars       += len(ref)
 
-        # WER — word level
+        # WER
         hyp_words = hyp.split()
         ref_words = ref.split()
         total_word_errors += edit_distance(hyp_words, ref_words)
@@ -319,10 +317,8 @@ def compute_geometry(
         waveform = batch["waveforms"].to(device)
         lengths  = batch["audio_lengths"].to(device)
 
-        # Get raw context vectors
-        reprs = model.get_representations(waveform, lengths)  # (B, T, 256)
-
-        # Flatten batch and time dims, move to CPU
+        reprs = model.get_representations(waveform, lengths)
+        
         B, T, H = reprs.shape
         all_repr.append(reprs.reshape(B * T, H).cpu().float().numpy())
 

@@ -28,16 +28,13 @@ def build_lexicon_from_dict(dict_path, output_path, vocab_chars=None):
             continue
         seen_words.add(word)
 
-        # Split word into grapheme clusters — matches tokenizer behavior
         graphemes = list(glib.graphemes(word))
 
-        # OOV check against grapheme vocab
         if vocab_chars is not None:
             if not all(g in vocab_chars for g in graphemes):
                 skipped_oov += 1
                 continue
 
-        # Lexicon format: word TAB grapheme1 grapheme2 ...
         char_str = " ".join(graphemes)
         lines.append(f"{word}\t{char_str}")
 
